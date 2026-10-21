@@ -111,6 +111,24 @@ resource "aws_security_group" "app_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # Ingress: Grafana Dashboard (Port 3000)
+  ingress {
+    description = "Grafana metrics dashboard"
+    from_port   = 3000
+    to_port     = 3000
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Ingress: Prometheus Metrics UI (Port 9090)
+  ingress {
+    description = "Prometheus server interface"
+    from_port   = 9090
+    to_port     = 9090
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   # Outgress: Allow all outbound connections
   egress {
     description = "Allow all outbound traffic"

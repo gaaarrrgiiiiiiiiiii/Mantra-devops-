@@ -69,6 +69,12 @@ langdetect>=1.0.9
 rich>=13.9.0
 
 # ------------------------------
+# Observability & Metrics
+# ------------------------------
+prometheus-fastapi-instrumentator>=7.0.0
+prometheus_client>=0.20.0
+
+# ------------------------------
 # Testing
 # ------------------------------
 pytest>=8.3.0

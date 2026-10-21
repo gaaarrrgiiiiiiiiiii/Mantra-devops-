@@ -404,3 +404,11 @@ def create_app(settings: Optional[Settings] = None, repository: Optional[Reposit
 
 
 app = create_app()
+
+# Expose Prometheus metrics (/metrics) for monitoring and observability
+try:
+    from prometheus_fastapi_instrumentator import Instrumentator
+    Instrumentator().instrument(app).expose(app)
+except Exception as e:
+    logger.warning("Prometheus Instrumentator initialization skipped: %s", e)
+
