@@ -3,9 +3,9 @@ pipeline {
 
     environment {
         AWS_REGION     = 'us-east-1'
-        ECR_REGISTRY   = credentials('ecr-registry-id')
+        ECR_REGISTRY   = '657157860151.dkr.ecr.us-east-1.amazonaws.com'
         IMAGE_NAME     = 'mantra-backend'
-        TARGET_EC2_IP  = credentials('mantra-target-ec2-ip')
+        TARGET_EC2_IP  = '34.201.6.14'
     }
 
     options {

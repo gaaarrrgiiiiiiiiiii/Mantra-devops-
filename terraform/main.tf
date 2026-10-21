@@ -225,9 +225,30 @@ resource "aws_iam_role_policy_attachment" "attach_cloudwatch" {
   policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
 }
 
+resource "aws_iam_role_policy_attachment" "attach_ecr" {
+  role       = aws_iam_role.ec2_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser"
+}
+
 resource "aws_iam_instance_profile" "ec2_profile" {
   name = "${var.project_name}-ec2-instance-profile"
   role = aws_iam_role.ec2_role.name
+}
+
+# -----------------------------------------------------------------------------
+# Amazon Elastic Container Registry (ECR) for Container Images
+# -----------------------------------------------------------------------------
+resource "aws_ecr_repository" "backend" {
+  name                 = "${var.project_name}-backend"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  tags = {
+    Name = "${var.project_name}-backend-ecr"
+  }
 }
 
 # Developer IAM Policy (for Engineer 1)

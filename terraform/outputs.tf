@@ -32,3 +32,8 @@ output "engineer1_iam_policy_arn" {
   description = "ARN of the IAM developer policy to attach to Engineer 1"
   value       = aws_iam_policy.developer_policy.arn
 }
+
+output "ecr_repository_url" {
+  description = "URL of the Amazon ECR repository for Mantra backend"
+  value       = aws_ecr_repository.backend.repository_url
+}
