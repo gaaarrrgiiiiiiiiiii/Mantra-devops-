@@ -3,6 +3,7 @@
 *.env
 backend/.env
 backend/.env.*
+!.env.example
 .local/
 .test-storage/
 .pytest_cache/
@@ -15,3 +16,18 @@ __pycache__/
 .DS_Store
 node_modules/
 dist/
+
+# Terraform ignores
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
