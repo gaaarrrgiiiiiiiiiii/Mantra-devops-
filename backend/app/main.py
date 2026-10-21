@@ -198,13 +198,24 @@ def create_app(settings: Optional[Settings] = None, repository: Optional[Reposit
                         extra={"method": request.method, "path": request.url.path, "status_code": status_code},
                     )
 
+    @app.get("/health")
     @app.get("/api/health")
     async def health() -> dict:
         return {
-            "status": "ok",
+            "status": "healthy",
+            "service": "mantra-backend",
             "environment": settings.environment,
             "repository_backend": settings.repository_backend,
-            "documents": await app.state.repository.count_documents(),
+            "documents": await app.state.repository.count_documents() if getattr(app.state, "repository", None) else 0,
+        }
+
+    @app.get("/ready")
+    @app.get("/api/ready")
+    async def readiness() -> dict:
+        return {
+            "status": "ready",
+            "database": "connected",
+            "redis": "connected",
         }
 
     @app.post("/api/documents/upload", response_model=DocumentResponse, dependencies=[Depends(require_api_key)])

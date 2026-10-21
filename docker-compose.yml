@@ -8,9 +8,17 @@ services:
     ports:
       - "8000:8000"
     environment:
+      - IKI_ENVIRONMENT=production
+      - IKI_REQUIRE_API_KEY=false
+      - IKI_REPOSITORY_BACKEND=postgres
+      - IKI_DATABASE_URL=postgresql+asyncpg://mantra_user:mantra_pass@db:5432/mantra_db
+      - IKI_REDIS_URL=redis://redis:6379/0
+      - IKI_STORAGE_BACKEND=s3
+      - IKI_S3_BUCKET=mantra-industrial-docs-657157860151
+      - AWS_REGION=us-east-1
       - DATABASE_URL=postgresql://mantra_user:mantra_pass@db:5432/mantra_db
       - REDIS_URL=redis://redis:6379/0
-      - S3_BUCKET_NAME=mantra-industrial-docs
+      - S3_BUCKET_NAME=mantra-industrial-docs-657157860151
     depends_on:
       db:
         condition: service_healthy
