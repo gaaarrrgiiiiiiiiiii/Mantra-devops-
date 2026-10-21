@@ -55,5 +55,5 @@ variable "allowed_ssh_cidr" {
 variable "s3_bucket_name" {
   description = "Name of the S3 bucket for industrial documents storage"
   type        = string
-  default     = "mantra-industrial-docs"
+  default     = "mantra-industrial-docs-657157860151"
 }
