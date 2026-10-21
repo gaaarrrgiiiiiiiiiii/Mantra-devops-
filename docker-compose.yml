@@ -9,7 +9,8 @@ services:
       - "8000:8000"
     environment:
       - IKI_ENVIRONMENT=production
-      - IKI_REQUIRE_API_KEY=false
+      - IKI_REQUIRE_API_KEY=true
+      - IKI_API_KEY=mantra-production-api-key-2026
       - IKI_REPOSITORY_BACKEND=postgres
       - IKI_DATABASE_URL=postgresql+asyncpg://mantra_user:mantra_pass@db:5432/mantra_db
       - IKI_REDIS_URL=redis://redis:6379/0
