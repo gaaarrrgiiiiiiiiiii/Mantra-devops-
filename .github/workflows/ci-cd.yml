@@ -10,7 +10,7 @@ env:
   AWS_REGION: us-east-1
   ECR_REGISTRY: 657157860151.dkr.ecr.us-east-1.amazonaws.com
   IMAGE_NAME: mantra-backend
-  TARGET_EC2_IP: 34.201.6.14
+  TARGET_EC2_IP: 3.210.183.205
 
 jobs:
   test:
