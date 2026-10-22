@@ -1,0 +1,20 @@
+groups:
+  - name: mantra_alerts
+    rules:
+      - alert: MantraBackendDown
+        expr: up{job="mantra-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Mantra Backend service is down"
+          description: "Mantra FastAPI backend instance has been unreachable for more than 1 minute."
+
+      - alert: MantraHighErrorRate
+        expr: sum(rate(http_requests_total{status_code=~"5.."}[2m])) / sum(rate(http_requests_total[2m])) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Mantra Backend high 5xx error rate"
+          description: "5xx HTTP responses are exceeding 5% of total traffic over the last 2 minutes."
