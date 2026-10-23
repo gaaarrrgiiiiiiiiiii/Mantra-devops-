@@ -346,3 +346,18 @@ resource "aws_instance" "app_server" {
     Role = "ApplicationHost"
   }
 }
+
+# -----------------------------------------------------------------------------
+# Static Elastic IP (EIP) for permanent IP retention across stop/starts
+# -----------------------------------------------------------------------------
+resource "aws_eip" "app_eip" {
+  instance = aws_instance.app_server.id
+  domain   = "vpc"
+
+  tags = {
+    Name      = "${var.project_name}-app-eip"
+    ManagedBy = "Terraform-Platform-Owner"
+    Owner     = "Platform-Engineer-Gargi"
+    Project   = var.project_name
+  }
+}

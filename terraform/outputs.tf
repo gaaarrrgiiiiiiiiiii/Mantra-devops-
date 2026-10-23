@@ -1,6 +1,6 @@
 output "ec2_public_ip" {
-  description = "Public IP address of the Mantra application server"
-  value       = aws_instance.app_server.public_ip
+  description = "Permanent Public Elastic IP address of the Mantra application server"
+  value       = aws_eip.app_eip.public_ip
 }
 
 output "ec2_instance_id" {

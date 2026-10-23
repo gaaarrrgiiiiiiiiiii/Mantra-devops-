@@ -19,12 +19,12 @@ The complete platform is deployed live on AWS EC2 (`t3.medium`) within a custom 
 
 | Service / Component | Port | Live Endpoint | Status / Description |
 | :--- | :---: | :--- | :--- |
-| **FastAPI Backend (Liveness)** | `8000` | [`http://3.210.183.205:8000/health`](http://3.210.183.205:8000/health) | `{"status":"healthy","service":"mantra-backend",...}` |
-| **Service Readiness Probe** | `8000` | [`http://3.210.183.205:8000/ready`](http://3.210.183.205:8000/ready) | `{"status":"ready","database":"connected","redis":"connected"}` |
-| **Prometheus Metrics Hook** | `8000` | [`http://3.210.183.205:8000/metrics`](http://3.210.183.205:8000/metrics) | Real-time RED metrics, HTTP throughput, latency, GC & memory |
-| **Grafana Monitoring Dashboard** | `3000` | [`http://3.210.183.205:3000`](http://3.210.183.205:3000) | Pre-provisioned *"Mantra Industrial DevOps Overview"* (`admin` / `mantra_admin_2026`) |
-| **Prometheus Server & Targets** | `9090` | [`http://3.210.183.205:9090/targets`](http://3.210.183.205:9090/targets) | Active scrape targets (`mantra-backend` & `prometheus` **UP**) + Alert rules |
-| **API Documentation (Swagger)** | `8000` | [`http://3.210.183.205:8000/docs`](http://3.210.183.205:8000/docs) | Interactive OpenAPI / Swagger interface |
+| **FastAPI Backend (Liveness)** | `8000` | [`http://32.193.54.28:8000/health`](http://32.193.54.28:8000/health) | `{"status":"healthy","service":"mantra-backend",...}` |
+| **Service Readiness Probe** | `8000` | [`http://32.193.54.28:8000/ready`](http://32.193.54.28:8000/ready) | `{"status":"ready","database":"connected","redis":"connected"}` |
+| **Prometheus Metrics Hook** | `8000` | [`http://32.193.54.28:8000/metrics`](http://32.193.54.28:8000/metrics) | Real-time RED metrics, HTTP throughput, latency, GC & memory |
+| **Grafana Monitoring Dashboard** | `3000` | [`http://32.193.54.28:3000`](http://32.193.54.28:3000) | Pre-provisioned *"Mantra Industrial DevOps Overview"* (`admin` / `mantra_admin_2026`) |
+| **Prometheus Server & Targets** | `9090` | [`http://32.193.54.28:9090/targets`](http://32.193.54.28:9090/targets) | Active scrape targets (`mantra-backend` & `prometheus` **UP**) + Alert rules |
+| **API Documentation (Swagger)** | `8000` | [`http://32.193.54.28:8000/docs`](http://32.193.54.28:8000/docs) | Interactive OpenAPI / Swagger interface |
 
 ---
 
