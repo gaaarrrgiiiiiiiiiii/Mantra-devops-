@@ -306,6 +306,23 @@ resource "aws_iam_policy" "developer_policy" {
   })
 }
 
+# Developer IAM User (Engineer 1 - Application Owner)
+resource "aws_iam_user" "engineer1" {
+  name = "${var.project_name}-engineer1-app-owner"
+
+  tags = {
+    Role        = "Application-Engineer"
+    Project     = var.project_name
+    Owner       = "Ayush-Gourav"
+    ManagedBy   = "Terraform-Platform-Owner"
+  }
+}
+
+resource "aws_iam_user_policy_attachment" "engineer1_developer_attach" {
+  user       = aws_iam_user.engineer1.name
+  policy_arn = aws_iam_policy.developer_policy.arn
+}
+
 # -----------------------------------------------------------------------------
 # EC2 Compute Instance (t3.medium Ubuntu 22.04 LTS)
 # -----------------------------------------------------------------------------
