@@ -11,6 +11,8 @@ WORKDIR /app
 RUN useradd -m -u 1001 appuser
 COPY --from=builder /root/.local /home/appuser/.local
 COPY app/ ./app/
+COPY regulatory_framework.json ./
+RUN mkdir -p /app/.local && chown appuser:appuser /app/.local
 
 ENV PATH=/home/appuser/.local/bin:$PATH
 USER appuser

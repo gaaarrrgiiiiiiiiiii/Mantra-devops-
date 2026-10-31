@@ -3,6 +3,19 @@ from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
+class HealthResponse(BaseModel):
+    status: str
+    service: str
+    environment: str
+    repository_backend: str
+
+
+class ReadinessResponse(BaseModel):
+    status: str
+    database: str
+    redis: str
+
+
 class DocumentMetadata(BaseModel):
     filename: str
     content_type: str
@@ -74,8 +87,8 @@ class Citation(BaseModel):
 
 
 class CopilotQuery(BaseModel):
-    question: str = Field(min_length=1)
-    limit: int = Field(default=5, ge=1, le=10)
+    question: str = Field(min_length=1, description="Question to answer using indexed documents.", examples=["What caused the P-205B bearing failure?"])
+    limit: int = Field(default=5, ge=1, le=10, description="Maximum number of evidence chunks to retrieve.")
 
 
 class CopilotResponse(BaseModel):

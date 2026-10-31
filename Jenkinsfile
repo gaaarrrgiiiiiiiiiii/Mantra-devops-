@@ -43,6 +43,14 @@ pipeline {
             }
         }
 
+        stage('Build Production Frontend') {
+            steps {
+                dir('frontend') {
+                    sh 'npm ci && npm run build'
+                }
+            }
+        }
+
         stage('Static Analysis / Quality Gate') {
             steps {
                 echo 'Running static code quality & security checks...'

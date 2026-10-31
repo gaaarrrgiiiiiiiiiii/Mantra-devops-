@@ -13,6 +13,8 @@
 
 ---
 
+See [application verification and frontend deployment](frontend/README.md) for tests, the Nginx port-80 setup, and the Swagger demo steps.
+
 ## 1. Live Deployment & Telemetry Endpoints
 
 The complete platform is deployed live on AWS EC2 (`t3.medium`) within a custom VPC:

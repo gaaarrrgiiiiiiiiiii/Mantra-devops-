@@ -16,6 +16,20 @@ jobs:
   test:
     name: Run Pytest Test Suite
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: mantra_test
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: mantra_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mantra_test -d mantra_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -33,14 +47,35 @@ jobs:
 
       - name: Run Pytest
         env:
+          MANTRA_TEST_POSTGRES_URL: postgresql+asyncpg://mantra_test:ci-only-password@localhost:5432/mantra_test
           IKI_ENVIRONMENT: test
           IKI_REQUIRE_API_KEY: "false"
         run: |
           PYTHONPATH=backend pytest tests/ -v
 
+  frontend-build:
+    name: Build Production Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Build frontend
+        run: npm run build
+
   docker-build:
     name: Build & Validate Docker Image
-    needs: test
+    needs: [test, frontend-build]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -53,6 +88,7 @@ jobs:
         run: |
           docker build -t ${{ env.IMAGE_NAME }}:${{ github.sha }} ./backend
           docker tag ${{ env.IMAGE_NAME }}:${{ github.sha }} ${{ env.IMAGE_NAME }}:latest
+          docker build -t mantra-frontend:${{ github.sha }} ./frontend
 
   smoke-test:
     name: Production Endpoint Smoke Test
