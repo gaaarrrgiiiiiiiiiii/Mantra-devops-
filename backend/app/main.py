@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 import json
 import logging
@@ -5,15 +6,19 @@ from secrets import compare_digest
 import time
 from typing import AsyncIterator, Optional
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, Security, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.security import APIKeyHeader
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from .config import Settings, get_settings
 from .database import create_engine_and_session_factory, initialize_database
 from .errors import UploadTooLargeError
 from .models import (
     AdminOverview,
+    HealthResponse,
+    ReadinessResponse,
     AuditEvent,
     ComplianceGap,
     ComplianceStatus,
@@ -50,6 +55,7 @@ from .storage import create_storage_backend, sanitize_filename
 
 
 logger = logging.getLogger(__name__)
+MONITORING_PATHS = {"/health", "/api/health", "/ready", "/api/ready", "/metrics"}
 
 
 def create_app(settings: Optional[Settings] = None, repository: Optional[Repository] = None) -> FastAPI:
@@ -136,7 +142,9 @@ def create_app(settings: Optional[Settings] = None, repository: Optional[Reposit
                 return forwarded.split(",")[0].strip()
         return request.client.host if request.client else "unknown"
 
-    async def require_api_key(x_api_key: Optional[str] = Header(default=None, alias=settings.api_key_header)) -> None:
+    api_key_header = APIKeyHeader(name=settings.api_key_header, auto_error=False)
+
+    async def require_api_key(x_api_key: Optional[str] = Security(api_key_header)) -> None:
         if not settings.require_api_key:
             return
         if not settings.api_key:
@@ -154,7 +162,7 @@ def create_app(settings: Optional[Settings] = None, repository: Optional[Reposit
     @app.middleware("http")
     async def rate_limit(request: Request, call_next):
         limit = settings.rate_limit_per_minute
-        if limit > 0 and request.url.path != "/api/health":
+        if limit > 0 and request.url.path not in MONITORING_PATHS:
             host = client_ip(request)
             window = int(time.time() // 60)
             stored_window, count = rate_hits.get(host, (window, 0))
@@ -170,6 +178,8 @@ def create_app(settings: Optional[Settings] = None, repository: Optional[Reposit
 
     @app.middleware("http")
     async def audit_requests(request: Request, call_next):
+        if request.url.path in MONITORING_PATHS:
+            return await call_next(request)
         started = time.perf_counter()
         status_code = 500
         try:
@@ -198,28 +208,43 @@ def create_app(settings: Optional[Settings] = None, repository: Optional[Reposit
                         extra={"method": request.method, "path": request.url.path, "status_code": status_code},
                     )
 
-    @app.get("/health")
-    @app.get("/api/health")
+    @app.get("/health", tags=["Operations"], response_model=HealthResponse)
+    @app.get("/api/health", tags=["Operations"], response_model=HealthResponse)
     async def health() -> dict:
+        """Return liveness without accessing the database or cache."""
         return {
             "status": "healthy",
             "service": "mantra-backend",
             "environment": settings.environment,
             "repository_backend": settings.repository_backend,
-            "documents": await app.state.repository.count_documents() if getattr(app.state, "repository", None) else 0,
         }
 
-    @app.get("/ready")
-    @app.get("/api/ready")
-    async def readiness() -> dict:
-        return {
-            "status": "ready",
-            "database": "connected",
-            "redis": "connected",
-        }
+    @app.get("/ready", tags=["Operations"], response_model=ReadinessResponse, responses={503: {"model": ReadinessResponse, "description": "A configured dependency is unavailable"}})
+    @app.get("/api/ready", tags=["Operations"], response_model=ReadinessResponse, responses={503: {"model": ReadinessResponse, "description": "A configured dependency is unavailable"}})
+    async def readiness() -> Response:
+        """Check the repository and configured Redis connection. Return 503 if either dependency is unavailable; Redis is disabled when no URL is configured."""
+        checks = {"database": "unavailable", "redis": "disabled"}
+        try:
+            await asyncio.wait_for(app.state.repository.count_documents(), timeout=2)
+            checks["database"] = "connected"
+        except Exception:
+            logger.warning("Database readiness check failed", exc_info=True)
+        if settings.redis_url:
+            checks["redis"] = "unavailable"
+            try:
+                await asyncio.wait_for(app.state.copilot.exact_cache.client.ping(), timeout=2)
+                checks["redis"] = "connected"
+            except Exception:
+                logger.warning("Redis readiness check failed", exc_info=True)
+        ready = "unavailable" not in checks.values()
+        return JSONResponse(
+            status_code=200 if ready else 503,
+            content={"status": "ready" if ready else "not_ready", **checks},
+        )
 
-    @app.post("/api/documents/upload", response_model=DocumentResponse, dependencies=[Depends(require_api_key)])
+    @app.post("/api/documents/upload", response_model=DocumentResponse, dependencies=[Depends(require_api_key)], tags=["Documents"])
     async def upload_document(file: UploadFile = File(...)) -> DocumentResponse:
+        """Upload a multipart file, extract text and entities, and index searchable chunks. Identical content returns the existing document with duplicate status."""
         try:
             payload = await file.read()
             return await app.state.ingestion.ingest(
@@ -238,19 +263,22 @@ def create_app(settings: Optional[Settings] = None, repository: Optional[Reposit
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
-    @app.get("/api/documents", response_model=list[DocumentSummary], dependencies=[Depends(require_api_key)])
+    @app.get("/api/documents", response_model=list[DocumentSummary], dependencies=[Depends(require_api_key)], tags=["Documents"])
     async def list_documents(document_type: Optional[str] = None, equipment_tag: Optional[str] = None) -> list[DocumentSummary]:
+        """List document summaries, optionally filtered by document type or equipment tag."""
         return await app.state.admin.list_documents(document_type=document_type, equipment_tag=equipment_tag)
 
-    @app.get("/api/documents/{document_id}", response_model=DocumentResponse, dependencies=[Depends(require_api_key)])
+    @app.get("/api/documents/{document_id}", response_model=DocumentResponse, dependencies=[Depends(require_api_key)], tags=["Documents"])
     async def get_document(document_id: str) -> DocumentResponse:
+        """Retrieve indexed document metadata, text chunks, and extracted entities. Return 404 for an unknown ID."""
         document = await app.state.repository.get_document(document_id)
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
         return document
 
-    @app.get("/api/documents/{document_id}/raw", dependencies=[Depends(require_api_key)])
+    @app.get("/api/documents/{document_id}/raw", dependencies=[Depends(require_api_key)], tags=["Documents"])
     async def get_raw_document(document_id: str) -> Response:
+        """Download the original uploaded file. Return 404 if its document or stored payload is missing."""
         document = await app.state.repository.get_document(document_id)
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
@@ -264,92 +292,110 @@ def create_app(settings: Optional[Settings] = None, repository: Optional[Reposit
             headers={"Content-Disposition": f'attachment; filename="{sanitize_filename(document.metadata.filename)}"'},
         )
 
-    @app.get("/api/knowledge-graph", response_model=KnowledgeGraph, dependencies=[Depends(require_api_key)])
+    @app.get("/api/knowledge-graph", response_model=KnowledgeGraph, dependencies=[Depends(require_api_key)], tags=["Knowledge graph"])
     async def knowledge_graph() -> KnowledgeGraph:
+        """Return the knowledge graph built from indexed documents."""
         return await app.state.repository.build_graph()
 
-    @app.get("/api/knowledge-graph/equipment/{equipment_tag}", response_model=KnowledgeGraph, dependencies=[Depends(require_api_key)])
+    @app.get("/api/knowledge-graph/equipment/{equipment_tag}", response_model=KnowledgeGraph, dependencies=[Depends(require_api_key)], tags=["Knowledge graph"])
     async def equipment_graph(equipment_tag: str) -> KnowledgeGraph:
+        """Return the graph for an equipment tag. Return 404 if the tag is unknown."""
         graph = await app.state.repository.build_graph_for_entity("EQUIPMENT_TAG", equipment_tag)
         if not graph.nodes:
             raise HTTPException(status_code=404, detail="Equipment tag not found")
         return graph
 
-    @app.post("/api/copilot/ask", response_model=CopilotResponse, dependencies=[Depends(require_api_key)])
+    @app.post("/api/copilot/ask", response_model=CopilotResponse, dependencies=[Depends(require_api_key)], tags=["Copilot"])
     async def ask_copilot(query: CopilotQuery) -> CopilotResponse:
+        """Ask a question against indexed documents and return an answer with source citations. The request accepts question and limit (1–10)."""
         return await app.state.copilot.answer(query.question, limit=query.limit)
 
-    @app.post("/api/copilot/stream", dependencies=[Depends(require_api_key)])
+    @app.post("/api/copilot/stream", dependencies=[Depends(require_api_key)], tags=["Copilot"], response_class=StreamingResponse, responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}})
     async def stream_copilot(query: CopilotQuery) -> StreamingResponse:
+        """Stream server-sent events as data: JSON frames with type token or done, ending each frame with a blank line."""
         async def event_source() -> AsyncIterator[str]:
             async for chunk in app.state.copilot.stream(query.question, limit=query.limit):
                 yield f"data: {json.dumps(chunk)}\n\n"
 
         return StreamingResponse(event_source(), media_type="text/event-stream")
 
-    @app.post("/api/maintenance/rca/{equipment_id}", response_model=RCAReport, dependencies=[Depends(require_api_key)])
+    @app.post("/api/maintenance/rca/{equipment_id}", response_model=RCAReport, dependencies=[Depends(require_api_key)], tags=["Maintenance"])
     async def rca_for_equipment(equipment_id: str) -> RCAReport:
+        """Analyze root causes and evidence chains for an equipment tag."""
         return await app.state.rca.rca("EQUIPMENT_TAG", equipment_id)
 
-    @app.get("/api/maintenance/health/{equipment_id}", response_model=EquipmentHealthReport, dependencies=[Depends(require_api_key)])
+    @app.get("/api/maintenance/health/{equipment_id}", response_model=EquipmentHealthReport, dependencies=[Depends(require_api_key)], tags=["Maintenance"])
     async def equipment_health(equipment_id: str) -> EquipmentHealthReport:
+        """Summarize equipment history and health from indexed evidence."""
         return await app.state.rca.health(equipment_id)
 
-    @app.get("/api/maintenance/predictions", response_model=list[MaintenancePrediction], dependencies=[Depends(require_api_key)])
+    @app.get("/api/maintenance/predictions", response_model=list[MaintenancePrediction], dependencies=[Depends(require_api_key)], tags=["Maintenance"])
     async def maintenance_predictions() -> list[MaintenancePrediction]:
+        """List evidence-based maintenance recommendations and urgency."""
         return await app.state.rca.predictions()
 
-    @app.get("/api/maintenance/clusters", response_model=FailureClusterReport, dependencies=[Depends(require_api_key)])
+    @app.get("/api/maintenance/clusters", response_model=FailureClusterReport, dependencies=[Depends(require_api_key)], tags=["Maintenance"])
     async def failure_clusters() -> FailureClusterReport:
+        """Group related failures from the indexed corpus."""
         return await app.state.rca.cluster_failures()
 
-    @app.post("/api/maintenance/investigate", response_model=RCAReport, dependencies=[Depends(require_api_key)])
+    @app.post("/api/maintenance/investigate", response_model=RCAReport, dependencies=[Depends(require_api_key)], tags=["Maintenance"])
     async def investigate(query: CopilotQuery) -> RCAReport:
+        """Investigate a natural-language maintenance question using root-cause analysis."""
         return await app.state.rca.investigate(query.question)
 
-    @app.get("/api/compliance/status", response_model=ComplianceStatus, dependencies=[Depends(require_api_key)])
+    @app.get("/api/compliance/status", response_model=ComplianceStatus, dependencies=[Depends(require_api_key)], tags=["Compliance"])
     async def compliance_status() -> ComplianceStatus:
+        """Report coverage against the configured regulatory framework."""
         return await app.state.compliance.status()
 
-    @app.get("/api/compliance/gaps", response_model=list[ComplianceGap], dependencies=[Depends(require_api_key)])
+    @app.get("/api/compliance/gaps", response_model=list[ComplianceGap], dependencies=[Depends(require_api_key)], tags=["Compliance"])
     async def compliance_gaps() -> list[ComplianceGap]:
+        """List missing or partial regulatory evidence and suggested actions."""
         return await app.state.compliance.gaps()
 
-    @app.post("/api/compliance/audit/{regulation}", response_model=EvidencePackage, dependencies=[Depends(require_api_key)])
+    @app.post("/api/compliance/audit/{regulation}", response_model=EvidencePackage, dependencies=[Depends(require_api_key)], tags=["Compliance"])
     async def compliance_audit(regulation: str) -> EvidencePackage:
+        """Build a cited evidence package for a regulation."""
         return await app.state.compliance.audit(regulation)
 
-    @app.get("/api/compliance/equipment/{equipment_id}", response_model=EquipmentCompliance, dependencies=[Depends(require_api_key)])
+    @app.get("/api/compliance/equipment/{equipment_id}", response_model=EquipmentCompliance, dependencies=[Depends(require_api_key)], tags=["Compliance"])
     async def compliance_equipment(equipment_id: str) -> EquipmentCompliance:
+        """Report regulatory evidence coverage for an equipment tag."""
         return await app.state.compliance.equipment_status(equipment_id)
 
-    @app.get("/api/failures/patterns", response_model=PatternReport, dependencies=[Depends(require_api_key)])
+    @app.get("/api/failures/patterns", response_model=PatternReport, dependencies=[Depends(require_api_key)], tags=["Failure intelligence"])
     async def failure_patterns() -> PatternReport:
+        """Summarize recurring failure patterns in indexed documents."""
         return await app.state.failure_intelligence.patterns()
 
-    @app.get("/api/failures/analysis/{document_id}", response_model=IncidentAnalysis, dependencies=[Depends(require_api_key)])
+    @app.get("/api/failures/analysis/{document_id}", response_model=IncidentAnalysis, dependencies=[Depends(require_api_key)], tags=["Failure intelligence"])
     async def failure_analysis(document_id: str) -> IncidentAnalysis:
+        """Analyze contributing factors in an incident document. Return 404 for an unknown ID."""
         analysis = await app.state.failure_intelligence.analyze_incident(document_id)
         if analysis is None:
             raise HTTPException(status_code=404, detail="Document not found")
         return analysis
 
-    @app.get("/api/failures/similar/{document_id}", response_model=SimilarIncidentReport, dependencies=[Depends(require_api_key)])
+    @app.get("/api/failures/similar/{document_id}", response_model=SimilarIncidentReport, dependencies=[Depends(require_api_key)], tags=["Failure intelligence"])
     async def failure_similar(document_id: str) -> SimilarIncidentReport:
+        """Find similar incidents and lessons for a document. Return 404 for an unknown ID."""
         report = await app.state.failure_intelligence.similar_incidents(document_id)
         if report is None:
             raise HTTPException(status_code=404, detail="Document not found")
         return report
 
-    @app.post("/api/failures/analyze", response_model=FailureWarning, dependencies=[Depends(require_api_key)])
+    @app.post("/api/failures/analyze", response_model=FailureWarning, dependencies=[Depends(require_api_key)], tags=["Failure intelligence"])
     async def failure_analyze(document_id: str) -> FailureWarning:
+        """Check a document for failure warnings. Supply document_id as a query parameter; unknown IDs return 404."""
         warning = await app.state.failure_intelligence.check_new_document(document_id)
         if warning is None:
             raise HTTPException(status_code=404, detail="Document not found")
         return warning
 
-    @app.get("/api/lessons", response_model=list[FailurePattern], dependencies=[Depends(require_api_key)])
+    @app.get("/api/lessons", response_model=list[FailurePattern], dependencies=[Depends(require_api_key)], tags=["Failure intelligence"])
     async def lessons(q: Optional[str] = None) -> list[FailurePattern]:
+        """List lessons from failure patterns, optionally filtered by text, equipment, or filename."""
         report = await app.state.failure_intelligence.patterns()
         if not q:
             return report.patterns
@@ -361,24 +407,27 @@ def create_app(settings: Optional[Settings] = None, repository: Optional[Reposit
             or any(needle in f.lower() for f in p.document_filenames)
         ]
 
-    @app.get("/api/admin/overview", response_model=AdminOverview, dependencies=[Depends(require_api_key)])
+    @app.get("/api/admin/overview", response_model=AdminOverview, dependencies=[Depends(require_api_key)], tags=["Administration"])
     async def admin_overview() -> AdminOverview:
+        """Report document counts, API usage, and ingestion pipeline status."""
         return await app.state.admin.overview()
 
     @app.get(
-        "/api/admin/ingestion-failures",
+        "/api/admin/ingestion-failures", tags=["Administration"],
         response_model=list[IngestionFailure],
         dependencies=[Depends(require_api_key)],
     )
     async def list_ingestion_failures() -> list[IngestionFailure]:
+        """List retained ingestion failures awaiting operator review or reprocessing."""
         return await app.state.repository.list_ingestion_failures()
 
     @app.post(
-        "/api/admin/ingestion-failures/{failure_id}/reprocess",
+        "/api/admin/ingestion-failures/{failure_id}/reprocess", tags=["Administration"],
         response_model=DocumentResponse,
         dependencies=[Depends(require_api_key)],
     )
     async def reprocess_ingestion_failure(failure_id: str) -> DocumentResponse:
+        """Retry a retained failed upload. Remove its failure record after successful indexing."""
         try:
             return await app.state.ingestion.reprocess_failure(failure_id)
         except UnsupportedFormatError as exc:
@@ -392,23 +441,17 @@ def create_app(settings: Optional[Settings] = None, repository: Optional[Reposit
             raise HTTPException(status_code=status_code, detail=str(exc))
 
     @app.delete(
-        "/api/admin/ingestion-failures/{failure_id}",
+        "/api/admin/ingestion-failures/{failure_id}", tags=["Administration"],
         status_code=204,
         dependencies=[Depends(require_api_key)],
     )
     async def dismiss_ingestion_failure(failure_id: str) -> Response:
+        """Delete a retained ingestion failure record and return 204."""
         await app.state.repository.delete_ingestion_failure(failure_id)
         return Response(status_code=204)
 
+    Instrumentator().instrument(app).expose(app, include_in_schema=False)
     return app
 
 
 app = create_app()
-
-# Expose Prometheus metrics (/metrics) for monitoring and observability
-try:
-    from prometheus_fastapi_instrumentator import Instrumentator
-    Instrumentator().instrument(app).expose(app)
-except Exception as e:
-    logger.warning("Prometheus Instrumentator initialization skipped: %s", e)
-

@@ -1,6 +1,14 @@
-version: '3.8'
-
 services:
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    environment:
+      IKI_API_KEY: ${IKI_API_KEY:?Set IKI_API_KEY in .env before starting Compose}
+    depends_on:
+      - backend
+
   backend:
     build:
       context: ./backend
@@ -11,7 +19,7 @@ services:
     environment:
       - IKI_ENVIRONMENT=production
       - IKI_REQUIRE_API_KEY=true
-      - IKI_API_KEY=mantra-production-api-key-2026
+      - IKI_API_KEY=${IKI_API_KEY:?Set IKI_API_KEY in .env before starting Compose}
       - IKI_REPOSITORY_BACKEND=postgres
       - IKI_DATABASE_URL=postgresql+asyncpg://mantra_user:mantra_pass@db:5432/mantra_db
       - IKI_REDIS_URL=redis://redis:6379/0
