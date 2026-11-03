@@ -33,6 +33,8 @@ flowchart TD
 
 Only the gateway is public. SSH requires the configured operator CIDR. Databases have no host port bindings. Monitoring ports bind to loopback, and Jenkins listens on `127.0.0.1:8080`. The instance profile supplies AWS credentials; access keys are not embedded in application configuration.
 
+Set `MANTRA_TLS_SERVER_NAME` to the public IP or hostname used in `MANTRA_SITE_ADDRESS`.
+
 ## Configuration and access
 
 Copy `.env.example` to `.env`, replace every placeholder, and protect it with `chmod 600`. Use URL-safe database passwords because the connection URL embeds the password. Generate the gateway's bcrypt hash using `caddy hash-password`; preserve its dollar signs by single-quoting the `.env` value. Keep runtime credentials outside Git. Existing deployments use `/opt/mantra/.env`.

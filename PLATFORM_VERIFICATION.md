@@ -11,7 +11,7 @@ Acceptance covers the two-engineer DevOps plan and the single-EC2 hardening task
 | VPC, subnet, internet routing, EC2 and permanent IP | Verified | Terraform refresh completed; subsequent plan reported **no changes**. EC2 was updated in place. |
 | Encrypted remote state and locking | Verified | S3 state object reports AES256 encryption and a version ID. Terraform acquired/released the DynamoDB lock during plan/apply. |
 | Private document bucket | Verified | Terraform manages encryption, versioning and public-access blocks. The running backend performed a real S3 put/get/delete using its instance role. |
-| Scoped application engineer IAM access | Verified | IAM simulation allowed S3 Get/Put/Delete on the project bucket and denied EC2 termination and IAM user creation. |
+| Scoped application engineer IAM access | Verified | Existing credential is active. IAM simulation allowed S3 Get/Put/Delete on the project bucket and denied EC2 termination and IAM user creation. |
 | Individual SSH keys | Verified | Both `mantra-eng1` and `mantra-eng2` authenticated successfully. Private keys are in the operator's `.ssh` directory, outside this repository. |
 | Network restrictions | Verified | SSH is restricted to the operator CIDR. Only gateway ports 80/443 are public; database/cache have no host ports; monitoring binds to loopback. |
 | Instance-profile security | Verified | IMDSv2 is required with a container-compatible hop limit. Backend STS identity is the EC2 role. Jenkins ECR push permissions target the project repository. |
@@ -25,15 +25,18 @@ Acceptance covers the two-engineer DevOps plan and the single-EC2 hardening task
 | Alert routing — P3 | Verified end to end | Alertmanager reported one successful SNS notification and zero failures. The recipient confirmed both the subscription and receipt of the test email. |
 | Alert rule correctness | Verified | `promtool test rules` passed downtime timing, a 10% error rate at low traffic, and a normal 1% error rate. The metric label is `status`. |
 | CloudWatch collection | Verified | Agent is active; AWS shows host and Docker log streams with event timestamps. Log groups have 14-day retention. |
-| CI security gates — P4 | Verified | Bandit passed. Jenkins snapshot verification build **#1 SUCCESS** ran image build, five runtime tests and Trivy. Full reports retain vendor-unpatched findings; fixable high/critical runtime findings block release. |
+| CI security gates — P4 | Verified | Bandit passed. Jenkins snapshot build **#1 SUCCESS** and main build **#2 SUCCESS** ran build, five runtime tests and Trivy. The released image has **0 fixable high/critical findings, 0 critical findings, and 45 vendor-unpatched high OS findings** retained in the full report. |
 | Jenkins on the application EC2 host | Verified | Native systemd service is active and bound to loopback. Authentication, required plugins, deployment credential, pinned host key and Jenkinsfile validation passed. |
-| Main-branch automatic delivery | Publication verification in progress | The main job is prepared. It is enabled only after the verified source is published, preventing execution of the previous pipeline. |
-| Backups and recovery — P5 | Verified | Daily backup cron is installed for 07:30 IST. A production pg_dump was uploaded to S3, downloaded and restored into a disposable database successfully. Production data was preserved. |
+| Main-branch delivery | Verified — Jenkins build #2 SUCCESS | Published commit `a48f9e94bc4b698979d9c1c5b863dea4c6b8dd17` was built, tested, scanned, pushed to ECR and deployed through the dedicated SSH credential. Ansible reported **30 ok, 0 failed**, and the optional migration step was correctly skipped. The live image reference matches that commit. SCM polling is enabled every five minutes. |
+| GitHub Actions | Verified — SUCCESS | [Run 41713462946](https://github.com/gaaarrrgiiiiiiiiiii/Mantra-devops-/actions/runs/41713462946) passed for the released source. |
+| Backups and recovery — P5 | Verified | Daily backup cron is installed for 07:30 IST. A production pg_dump was uploaded to S3, downloaded and restored into a disposable database successfully. The backup also passed with a clean cron-style environment, and its CloudWatch log stream received events. Production data was preserved. |
 | Host and network hardening — P6 | Verified | Direct public API, Grafana and Prometheus ingress was removed; database and Redis host bindings were removed. SSH host checking is enabled. |
 
 ## Evidence and repeatable checks
 
 The host's successful check results are saved at `/var/log/mantra-platform-verification.json`. Runtime configuration is `/opt/mantra/.env`; current web/Grafana access details are `/root/mantra-access.json`. The Jenkins admin password is `/var/lib/jenkins/secrets/mantra-admin-password`. Retrieve credentials privately over SSH; do not place them in Git or chat.
+
+Post-release checks passed against the image delivered by Jenkins. Workstation checks returned HTTPS readiness **200**, anonymous API access **401**, and public Grafana access **403**. Non-secret raw evidence is saved locally under `.local/verification/`, including live acceptance, post-release checks, the Jenkins build log and full Trivy JSON.
 
 Useful commands from a Linux checkout or the EC2 verification directory:
 
