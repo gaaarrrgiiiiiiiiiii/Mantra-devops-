@@ -11,8 +11,8 @@ Acceptance covers the two-engineer DevOps plan and the single-EC2 hardening task
 | VPC, subnet, internet routing, EC2 and permanent IP | Verified | Terraform refresh completed; subsequent plan reported **no changes**. EC2 was updated in place. |
 | Encrypted remote state and locking | Verified | S3 state object reports AES256 encryption and a version ID. Terraform acquired/released the DynamoDB lock during plan/apply. |
 | Private document bucket | Verified | Terraform manages encryption, versioning and public-access blocks. The running backend performed a real S3 put/get/delete using its instance role. |
-| Scoped application engineer IAM access | Verified | Existing credential is active. IAM simulation allowed S3 Get/Put/Delete on the project bucket and denied EC2 termination and IAM user creation. |
-| Individual SSH keys | Verified | Both `mantra-eng1` and `mantra-eng2` authenticated successfully. Private keys are in the operator's `.ssh` directory, outside this repository. |
+| Scoped application engineer IAM access | Provisioned and platform-tested; teammate sign-in pending | Existing S3/log policy retained. SSM target/custom document allowed; default shell explicitly denied; SendCommand, termination and IAM tagging denied. Managed node Online; Terraform plan has no changes. |
+| Separate EC2 users | Verified on host; teammate session pending | Application uses Session Manager as `mantra-app` in a private home/work directory, without sudo or Docker access. Generated `mantra-eng1` was removed from shared administrator SSH access. Production secrets and instance metadata credentials are inaccessible to the application account. Platform SSH remains available. |
 | Network restrictions | Verified | SSH is restricted to the operator CIDR. Only gateway ports 80/443 are public; database/cache have no host ports; monitoring binds to loopback. |
 | Instance-profile security | Verified | IMDSv2 is required with a container-compatible hop limit. Backend STS identity is the EC2 role. Jenkins ECR push permissions target the project repository. |
 | Production container delivery | Verified | Eight-service isolated stack passed startup, SPA routing, authentication, pgvector, storage dependency failures and recovery checks. Backend runs as `appuser`. |
@@ -55,11 +55,16 @@ The runtime's unused pip installation was removed because its vendored inventory
 
 ## Application engineer handoff
 
-- [x] Frontend container, gateway integration, truthful readiness and server-side API-key delivery are now supplied.
-- [ ] Supply and package Alembic migrations. Ansible detects `/app/alembic.ini` and runs `alembic upgrade head` when available; this path awaits the application's migration package. Disable automatic schema creation when adopting migrations.
-- [ ] Expand document ingestion, retrieval, copilot/citation, authentication and rate-limit tests. The current five tests cover health and dependency readiness.
-- [ ] Pin/reconcile backend dependencies for reproducible application builds.
-- [ ] Add asynchronous ingestion workers and document job status.
-- [ ] Arrange secure delivery of the application engineer's private SSH key and provide any additional operator CIDR needed for SSH access.
+Use the complete [application checklist](APPLICATION_ENGINEER_CHECKLIST.md) and [access/remote acceptance guide](TEAM_ACCESS_AND_REMOTE_ACCEPTANCE.md).
+
+- [x] Frontend container, gateway integration, truthful readiness and server-side API-key delivery are supplied by the platform.
+- [x] Application owner submitted [PR #3](https://github.com/gaaarrrgiiiiiiiiiii/Mantra-devops-/pull/3), with broader API/PostgreSQL tests and successful CI. It remains open and is not deployed.
+- [ ] Integrate PR #3 with the hardened platform, review it, rerun checks, merge and verify deployed behavior.
+- [ ] Correct deployed schema: `document_chunks.embedding` and `ts_content` are absent despite native retrieval code expecting them. Supply versioned migrations, existing-data backfills and tests. Ansible detects `/app/alembic.ini` and runs `alembic upgrade head` when packaged; disable automatic schema creation when adopting migrations.
+- [ ] Accept the broader application tests and features on the merged/deployed release, reconcile dependencies, and explicitly scope any asynchronous worker delivery.
+- [ ] Teammate confirms own-device SSM sign-in; platform owner confirms transcript delivery. No shared administrator private key is required.
+- [ ] Agree/configure required GitHub reviews/checks and branch protection; canonical `main` was unprotected at inspection.
+
+The platform infrastructure verification is distinct from application acceptance. The latest read-only runtime audit reports hashing embeddings and deterministic answers; confirm those modes meet the agreed release scope. Health 200 does not establish retrieval quality or complete product functionality.
 
 HTTPS for the Elastic IP uses Let's Encrypt's short-lived profile. References: [Let's Encrypt IP certificates](https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability), [Caddy TLS configuration](https://caddyserver.com/docs/caddyfile/directives/tls), [Jenkins Linux installation](https://www.jenkins.io/doc/book/installing/linux/).

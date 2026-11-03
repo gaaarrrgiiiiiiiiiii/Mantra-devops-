@@ -1,0 +1,98 @@
+---
+- name: Prepare isolated application engineer access
+  hosts: app_servers
+  become: true
+  tasks:
+    - name: Install the metadata credential guard prerequisite
+      ansible.builtin.apt:
+        name: iptables
+        state: present
+
+    - name: Create the application account group
+      ansible.builtin.group:
+        name: mantra-app
+        system: true
+
+    - name: Create the application account without administrator groups
+      ansible.builtin.user:
+        name: mantra-app
+        group: mantra-app
+        groups: ''
+        append: false
+        system: true
+        home: /home/mantra-app
+        create_home: true
+        shell: /bin/bash
+        password_lock: true
+
+    - name: Protect the application engineer's server workspace
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: mantra-app
+        group: mantra-app
+        mode: '0700'
+      loop:
+        - /home/mantra-app
+        - /home/mantra-app/work
+
+    - name: Retire the generated application key from the administrator account
+      ansible.builtin.lineinfile:
+        path: /home/ubuntu/.ssh/authorized_keys
+        regexp: '.* mantra-eng1$'
+        state: absent
+
+    - name: Install the application credential guard
+      ansible.builtin.copy:
+        src: ../../scripts/app-credential-guard.sh
+        dest: /usr/local/sbin/mantra-app-credential-guard
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Persist the credential guard across host restarts
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/mantra-app-credential-guard.service
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Block host IAM role credentials for the application shell
+          After=network-online.target
+          Before=snap.amazon-ssm-agent.amazon-ssm-agent.service amazon-ssm-agent.service
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/usr/local/sbin/mantra-app-credential-guard
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Activate the credential guard
+      ansible.builtin.systemd:
+        name: mantra-app-credential-guard
+        daemon_reload: true
+        enabled: true
+        state: restarted
+
+    - name: Verify production configuration cannot be read or changed
+      ansible.builtin.command: /bin/bash -c 'test ! -r /opt/mantra/.env && test ! -w /opt/mantra/docker-compose.yml && test ! -r /var/run/docker.sock'
+      become_user: mantra-app
+      changed_when: false
+
+    - name: Verify administrator escalation is unavailable
+      ansible.builtin.command: sudo -n true
+      become_user: mantra-app
+      register: sudo_attempt
+      failed_when: sudo_attempt.rc == 0
+      changed_when: false
+
+    - name: Verify host IAM role credentials are inaccessible
+      ansible.builtin.command: >-
+        curl --silent --connect-timeout 2 --max-time 3 --output /dev/null
+        -X PUT -H X-aws-ec2-metadata-token-ttl-seconds:60
+        http://169.254.169.254/latest/api/token
+      become_user: mantra-app
+      register: metadata_attempt
+      failed_when: metadata_attempt.rc == 0
+      changed_when: false

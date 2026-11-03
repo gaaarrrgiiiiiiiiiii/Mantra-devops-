@@ -4,6 +4,8 @@ Mantra combines a FastAPI knowledge API and React frontend with a single-host AW
 
 See [PLATFORM_VERIFICATION.md](PLATFORM_VERIFICATION.md) for dated verification results and outstanding dependencies. The original [DevOps plan](MANTRA_DEVOPS_PLAN.md) describes the work allocation; its example credentials and historical topology are not production configuration.
 
+The application owner should follow [APPLICATION_ENGINEER_CHECKLIST.md](APPLICATION_ENGINEER_CHECKLIST.md). [TEAM_ACCESS_AND_REMOTE_ACCEPTANCE.md](TEAM_ACCESS_AND_REMOTE_ACCEPTANCE.md) explains separate computer access, the restricted EC2 session and how to verify a PR through deployment and functional acceptance.
+
 ## Architecture
 
 ```mermaid
