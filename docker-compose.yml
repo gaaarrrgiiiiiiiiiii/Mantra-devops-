@@ -1,26 +1,49 @@
-version: '3.8'
-
 services:
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+  gateway:
+    image: caddy:2.11.7-alpine
     restart: unless-stopped
-    ports:
-      - "8000:8000"
     environment:
-      - IKI_ENVIRONMENT=production
-      - IKI_REQUIRE_API_KEY=true
-      - IKI_API_KEY=mantra-production-api-key-2026
-      - IKI_REPOSITORY_BACKEND=postgres
-      - IKI_DATABASE_URL=postgresql+asyncpg://mantra_user:mantra_pass@db:5432/mantra_db
-      - IKI_REDIS_URL=redis://redis:6379/0
-      - IKI_STORAGE_BACKEND=s3
-      - IKI_S3_BUCKET=mantra-industrial-docs-657157860151
-      - AWS_REGION=us-east-1
-      - DATABASE_URL=postgresql://mantra_user:mantra_pass@db:5432/mantra_db
-      - REDIS_URL=redis://redis:6379/0
-      - S3_BUCKET_NAME=mantra-industrial-docs-657157860151
+      MANTRA_SITE_ADDRESS: ${MANTRA_SITE_ADDRESS:-:80}
+      MANTRA_ACME_EMAIL: ${MANTRA_ACME_EMAIL:?Set MANTRA_ACME_EMAIL in .env}
+      MANTRA_TLS_SERVER_NAME: ${MANTRA_TLS_SERVER_NAME:-32.193.54.28}
+      MANTRA_WEB_USER: ${MANTRA_WEB_USER:-mantra}
+      MANTRA_WEB_PASSWORD_HASH: ${MANTRA_WEB_PASSWORD_HASH:?Set a bcrypt password hash in .env}
+      IKI_API_KEY: ${IKI_API_KEY:?Set IKI_API_KEY in .env}
+    ports:
+      - "${MANTRA_BIND_ADDRESS:-0.0.0.0}:${MANTRA_HTTP_PORT:-80}:80"
+      - "${MANTRA_BIND_ADDRESS:-0.0.0.0}:${MANTRA_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+      - frontend
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    expose:
+      - "80"
+
+  backend:
+    image: ${MANTRA_BACKEND_IMAGE:-mantra-backend:local}
+    build: ./backend
+    restart: unless-stopped
+    expose:
+      - "8000"
+    environment:
+      IKI_ENVIRONMENT: production
+      IKI_REQUIRE_API_KEY: "true"
+      IKI_API_KEY: ${IKI_API_KEY:?Set IKI_API_KEY in .env}
+      IKI_REPOSITORY_BACKEND: postgres
+      IKI_AUTO_CREATE_SCHEMA: ${IKI_AUTO_CREATE_SCHEMA:-true}
+      IKI_DATABASE_URL: postgresql+asyncpg://mantra_user:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/mantra_db
+      IKI_REDIS_URL: redis://redis:6379/0
+      IKI_STORAGE_BACKEND: ${IKI_STORAGE_BACKEND:-s3}
+      IKI_LOCAL_STORAGE_PATH: /tmp/mantra-storage
+      IKI_S3_BUCKET: ${IKI_S3_BUCKET:?Set IKI_S3_BUCKET in .env}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
     depends_on:
       db:
         condition: service_healthy
@@ -32,12 +55,11 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: mantra_user
-      POSTGRES_PASSWORD: mantra_pass
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: mantra_db
-    ports:
-      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./postgres/001-vector.sql:/docker-entrypoint-initdb.d/001-vector.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U mantra_user -d mantra_db"]
       interval: 5s
@@ -47,8 +69,6 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -57,32 +77,43 @@ services:
 
   prometheus:
     image: prom/prometheus:v2.54.1
-    container_name: mantra-prometheus
     restart: unless-stopped
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-      - ./prometheus/alert.rules.yml:/etc/prometheus/alert.rules.yml
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alert.rules.yml:/etc/prometheus/alert.rules.yml:ro
     ports:
-      - "9090:9090"
+      - "127.0.0.1:${MANTRA_PROMETHEUS_PORT:-9090}:9090"
     depends_on:
       - backend
+      - alertmanager
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    restart: unless-stopped
+    volumes:
+      - ./prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "127.0.0.1:${MANTRA_ALERTMANAGER_PORT:-9093}:9093"
 
   grafana:
     image: grafana/grafana:11.1.0
-    container_name: mantra-grafana
     restart: unless-stopped
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=mantra_admin_2026
-      - GF_USERS_ALLOW_SIGN_UP=false
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: ${MANTRA_GRAFANA_ROOT_URL:-http://localhost:3000/grafana/}
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
     volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - grafanadata:/var/lib/grafana
     ports:
-      - "3000:3000"
+      - "127.0.0.1:${MANTRA_GRAFANA_PORT:-3000}:3000"
     depends_on:
       - prometheus
 
 volumes:
   pgdata:
   grafanadata:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,34 @@
+{
+  "agent": { "run_as_user": "root" },
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/var/log/syslog",
+            "log_group_name": "/mantra/host",
+            "log_stream_name": "{instance_id}/syslog"
+          },
+          {
+            "file_path": "/var/log/mantra-backup.log",
+            "log_group_name": "/mantra/host",
+            "log_stream_name": "{instance_id}/backups"
+          },
+          {
+            "file_path": "/var/lib/docker/containers/*/*-json.log",
+            "log_group_name": "/mantra/docker",
+            "log_stream_name": "{instance_id}/containers"
+          }
+        ]
+      }
+    }
+  },
+  "metrics": {
+    "namespace": "Mantra/Host",
+    "append_dimensions": { "InstanceId": "${aws:InstanceId}" },
+    "metrics_collected": {
+      "mem": { "measurement": ["mem_used_percent"], "metrics_collection_interval": 60 },
+      "disk": { "measurement": ["used_percent"], "resources": ["/"], "metrics_collection_interval": 60 }
+    }
+  }
+}

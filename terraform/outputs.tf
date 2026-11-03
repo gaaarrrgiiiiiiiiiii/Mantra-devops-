@@ -37,3 +37,8 @@ output "ecr_repository_url" {
   description = "URL of the Amazon ECR repository for Mantra backend"
   value       = aws_ecr_repository.backend.repository_url
 }
+
+output "alert_topic_arn" {
+  description = "SNS topic used by Alertmanager"
+  value       = aws_sns_topic.alerts.arn
+}

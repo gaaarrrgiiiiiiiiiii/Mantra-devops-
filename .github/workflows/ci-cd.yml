@@ -1,66 +1,50 @@
-name: Mantra CI/CD Pipeline
+name: Mantra CI
+
+permissions:
+  contents: read
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
-
-env:
-  AWS_REGION: us-east-1
-  ECR_REGISTRY: 657157860151.dkr.ecr.us-east-1.amazonaws.com
-  IMAGE_NAME: mantra-backend
-  TARGET_EC2_IP: 32.193.54.28
+    branches: [main]
 
 jobs:
   test:
-    name: Run Pytest Test Suite
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
-
+          cache: pip
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt pytest httpx
-
-      - name: Run Pytest
+        run: pip install -r backend/requirements.txt bandit
+      - name: Run tests
         env:
           IKI_ENVIRONMENT: test
-          IKI_REQUIRE_API_KEY: "false"
-        run: |
-          PYTHONPATH=backend pytest tests/ -v
+          IKI_REQUIRE_API_KEY: 'false'
+        run: PYTHONPATH=backend pytest tests/ -v
+      - name: Static analysis
+        run: bandit -r backend/app -q
+      - name: Verify alert thresholds and timing
+        run: docker run --rm -v "$PWD/prometheus:/etc/prometheus:ro" -w /etc/prometheus --entrypoint promtool prom/prometheus:v2.54.1 test rules alert.rules.test.yml
 
   docker-build:
-    name: Build & Validate Docker Image
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker image
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t mantra-backend:${{ github.sha }} ./backend
+      - name: Scan image
         run: |
-          docker build -t ${{ env.IMAGE_NAME }}:${{ github.sha }} ./backend
-          docker tag ${{ env.IMAGE_NAME }}:${{ github.sha }} ${{ env.IMAGE_NAME }}:latest
-
-  smoke-test:
-    name: Production Endpoint Smoke Test
-    needs: docker-build
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Healthcheck Live EC2 Server
-        run: |
-          echo "Checking live production health at http://${{ env.TARGET_EC2_IP }}:8000/health"
-          curl --fail --retry 5 --retry-delay 5 http://${{ env.TARGET_EC2_IP }}:8000/health || echo "Target host checked"
+          scanner=aquasec/trivy@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/work" -w /work "$scanner" image --scanners vuln --severity HIGH,CRITICAL --format json --output trivy-report.json mantra-backend:${{ github.sha }}
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$scanner" image --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 mantra-backend:${{ github.sha }}
+      - name: Retain complete vulnerability report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-vulnerabilities
+          path: trivy-report.json

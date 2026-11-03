@@ -8,6 +8,7 @@ from typing import AsyncIterator, Optional
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from sqlalchemy import text
 
 from .config import Settings, get_settings
 from .database import create_engine_and_session_factory, initialize_database
@@ -84,6 +85,7 @@ def create_app(settings: Optional[Settings] = None, repository: Optional[Reposit
                 app_repository = SqlAlchemyRepository(session_factory)
 
         app.state.repository = app_repository
+        app.state.engine = engine
         app.state.storage = storage
         app.state.embedding_provider = embedding_provider
         app.state.ingestion = IngestionService(app_repository, settings, storage, embedding_provider)
@@ -206,17 +208,39 @@ def create_app(settings: Optional[Settings] = None, repository: Optional[Reposit
             "service": "mantra-backend",
             "environment": settings.environment,
             "repository_backend": settings.repository_backend,
-            "documents": await app.state.repository.count_documents() if getattr(app.state, "repository", None) else 0,
         }
 
     @app.get("/ready")
     @app.get("/api/ready")
-    async def readiness() -> dict:
-        return {
-            "status": "ready",
-            "database": "connected",
-            "redis": "connected",
-        }
+    async def readiness() -> Response:
+        db_ok = True
+        redis_ok = True
+        if app.state.engine is not None:
+            try:
+                async with app.state.engine.connect() as connection:
+                    await connection.execute(text("SELECT 1"))
+            except Exception:
+                db_ok = False
+        if settings.redis_url:
+            try:
+                import redis.asyncio as redis
+
+                client = redis.from_url(settings.redis_url, socket_connect_timeout=2, socket_timeout=2)
+                try:
+                    redis_ok = bool(await client.ping())
+                finally:
+                    await client.aclose()
+            except Exception:
+                redis_ok = False
+        ready = db_ok and redis_ok
+        return JSONResponse(
+            status_code=200 if ready else 503,
+            content={
+                "status": "ready" if ready else "unready",
+                "database": "connected" if db_ok else "unavailable",
+                "redis": "connected" if redis_ok else "unavailable",
+            },
+        )
 
     @app.post("/api/documents/upload", response_model=DocumentResponse, dependencies=[Depends(require_api_key)])
     async def upload_document(file: UploadFile = File(...)) -> DocumentResponse:

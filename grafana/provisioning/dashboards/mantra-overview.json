@@ -156,7 +156,7 @@
         "tooltip": { "mode": "multi" }
       },
       "targets": [
-        { "datasource": "Prometheus", "expr": "sum by (handler, status_code) (rate(http_requests_total[1m]))", "legendFormat": "{{handler}} [{{status_code}}]", "refId": "A" }
+        { "datasource": "Prometheus", "expr": "sum by (handler, status) (rate(http_requests_total[1m]))", "legendFormat": "{{handler}} [{{status}}]", "refId": "A" }
       ],
       "title": "HTTP Request Rate by Endpoint & Status",
       "type": "timeseries"

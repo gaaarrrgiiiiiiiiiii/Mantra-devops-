@@ -11,7 +11,7 @@ groups:
           description: "Mantra FastAPI backend instance has been unreachable for more than 1 minute."
 
       - alert: MantraHighErrorRate
-        expr: sum(rate(http_requests_total{status_code=~"5.."}[2m])) / sum(rate(http_requests_total[2m])) > 0.05
+        expr: (sum(rate(http_requests_total{status=~"5.."}[2m])) / clamp_min(sum(rate(http_requests_total[2m])), 1e-9)) > 0.05
         for: 2m
         labels:
           severity: warning

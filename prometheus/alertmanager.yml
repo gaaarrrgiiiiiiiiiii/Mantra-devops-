@@ -1,0 +1,17 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: aws-sns
+  group_by: ['alertname', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: aws-sns
+    sns_configs:
+      - topic_arn: arn:aws:sns:us-east-1:657157860151:mantra-alerts
+        sigv4:
+          region: us-east-1
+        send_resolved: true

@@ -1,0 +1,46 @@
+rule_files:
+  - alert.rules.yml
+evaluation_interval: 15s
+tests:
+  - interval: 15s
+    input_series:
+      - series: 'up{job="mantra-backend"}'
+        values: '0+0x8'
+    alert_rule_test:
+      - eval_time: 45s
+        alertname: MantraBackendDown
+        exp_alerts: []
+      - eval_time: 1m
+        alertname: MantraBackendDown
+        exp_alerts:
+          - exp_labels:
+              job: mantra-backend
+              severity: critical
+            exp_annotations:
+              summary: Mantra Backend service is down
+              description: Mantra FastAPI backend instance has been unreachable for more than 1 minute.
+  - interval: 1m
+    input_series:
+      - series: 'http_requests_total{status="5xx",handler="/api/documents",method="GET"}'
+        values: '0+1x6'
+      - series: 'http_requests_total{status="2xx",handler="/api/documents",method="GET"}'
+        values: '0+9x6'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: MantraHighErrorRate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Mantra Backend high 5xx error rate
+              description: 5xx HTTP responses are exceeding 5% of total traffic over the last 2 minutes.
+  - interval: 1m
+    input_series:
+      - series: 'http_requests_total{status="5xx"}'
+        values: '0+1x6'
+      - series: 'http_requests_total{status="2xx"}'
+        values: '0+99x6'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: MantraHighErrorRate
+        exp_alerts: []

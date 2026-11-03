@@ -12,6 +12,7 @@ terraform {
     bucket         = "mantra-terraform-state-657157860151"
     key            = "prod/mantra.tfstate"
     region         = "us-east-1"
+    encrypt        = true
     dynamodb_table = "mantra-terraform-locks"
   }
 }

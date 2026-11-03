@@ -1,0 +1,50 @@
+{
+    email {$MANTRA_ACME_EMAIL}
+    default_sni {$MANTRA_TLS_SERVER_NAME}
+    cert_issuer acme https://acme-v02.api.letsencrypt.org/directory {
+        profile shortlived
+    }
+}
+
+(application_auth) {
+    basic_auth {
+        {$MANTRA_WEB_USER} {$MANTRA_WEB_PASSWORD_HASH}
+    }
+}
+
+{$MANTRA_SITE_ADDRESS} {
+    encode gzip zstd
+
+    handle /api/* {
+        import application_auth
+        reverse_proxy backend:8000 {
+            header_up X-API-Key {$IKI_API_KEY}
+        }
+    }
+
+    handle /health {
+        reverse_proxy backend:8000
+    }
+
+    handle /ready {
+        reverse_proxy backend:8000
+    }
+
+    @monitoring {
+        path /grafana/*
+        remote_ip private_ranges
+    }
+
+    handle @monitoring {
+        reverse_proxy grafana:3000
+    }
+
+    handle /grafana/* {
+        respond "Monitoring access requires the private network" 403
+    }
+
+    handle {
+        import application_auth
+        reverse_proxy frontend:80
+    }
+}

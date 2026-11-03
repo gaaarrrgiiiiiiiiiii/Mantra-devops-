@@ -49,11 +49,20 @@ variable "ssh_key_name" {
 variable "allowed_ssh_cidr" {
   description = "CIDR block allowed to SSH into EC2 instance"
   type        = string
-  default     = "0.0.0.0/0"
+  validation {
+    condition     = var.allowed_ssh_cidr != "0.0.0.0/0" && can(cidrhost(var.allowed_ssh_cidr, 0))
+    error_message = "Set allowed_ssh_cidr to a valid, restricted CIDR. Public SSH is not allowed."
+  }
 }
 
 variable "s3_bucket_name" {
   description = "Name of the S3 bucket for industrial documents storage"
   type        = string
   default     = "mantra-industrial-docs-657157860151"
+}
+
+variable "alert_email" {
+  description = "Email address for SNS alert subscription. The recipient must confirm the AWS email."
+  type        = string
+  default     = ""
 }

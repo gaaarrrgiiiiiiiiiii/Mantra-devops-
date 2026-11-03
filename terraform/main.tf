@@ -102,33 +102,6 @@ resource "aws_security_group" "app_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Ingress: FastAPI API (Port 8000)
-  ingress {
-    description = "FastAPI backend endpoint"
-    from_port   = 8000
-    to_port     = 8000
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # Ingress: Grafana Dashboard (Port 3000)
-  ingress {
-    description = "Grafana metrics dashboard"
-    from_port   = 3000
-    to_port     = 3000
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # Ingress: Prometheus Metrics UI (Port 9090)
-  ingress {
-    description = "Prometheus server interface"
-    from_port   = 9090
-    to_port     = 9090
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
   # Outgress: Allow all outbound connections
   egress {
     description = "Allow all outbound traffic"
@@ -245,7 +218,41 @@ resource "aws_iam_role_policy_attachment" "attach_cloudwatch" {
 
 resource "aws_iam_role_policy_attachment" "attach_ecr" {
   role       = aws_iam_role.ec2_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser"
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+
+resource "aws_sns_topic" "alerts" {
+  name = "${var.project_name}-alerts"
+}
+
+resource "aws_cloudwatch_log_group" "host" {
+  name              = "/mantra/host"
+  retention_in_days = 14
+}
+
+resource "aws_cloudwatch_log_group" "docker" {
+  name              = "/mantra/docker"
+  retention_in_days = 14
+}
+
+resource "aws_sns_topic_subscription" "alert_email" {
+  count     = var.alert_email == "" ? 0 : 1
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = var.alert_email
+}
+
+resource "aws_iam_role_policy" "sns_publish" {
+  name = "${var.project_name}-sns-publish"
+  role = aws_iam_role.ec2_role.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "sns:Publish"
+      Resource = aws_sns_topic.alerts.arn
+    }]
+  })
 }
 
 resource "aws_iam_instance_profile" "ec2_profile" {
@@ -258,7 +265,7 @@ resource "aws_iam_instance_profile" "ec2_profile" {
 # -----------------------------------------------------------------------------
 resource "aws_ecr_repository" "backend" {
   name                 = "${var.project_name}-backend"
-  image_tag_mutability = "MUTABLE"
+  image_tag_mutability = "IMMUTABLE"
 
   image_scanning_configuration {
     scan_on_push = true
@@ -267,6 +274,22 @@ resource "aws_ecr_repository" "backend" {
   tags = {
     Name = "${var.project_name}-backend-ecr"
   }
+}
+
+resource "aws_iam_role_policy" "jenkins_ecr_push" {
+  name = "${var.project_name}-jenkins-ecr-push"
+  role = aws_iam_role.ec2_role.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "ecr:InitiateLayerUpload", "ecr:UploadLayerPart",
+        "ecr:CompleteLayerUpload", "ecr:PutImage"
+      ]
+      Resource = aws_ecr_repository.backend.arn
+    }]
+  })
 }
 
 # Developer IAM Policy (for Engineer 1)
@@ -311,10 +334,10 @@ resource "aws_iam_user" "engineer1" {
   name = "${var.project_name}-engineer1-app-owner"
 
   tags = {
-    Role        = "Application-Engineer"
-    Project     = var.project_name
-    Owner       = "Ayush-Gourav"
-    ManagedBy   = "Terraform-Platform-Owner"
+    Role      = "Application-Engineer"
+    Project   = var.project_name
+    Owner     = "Ayush-Gourav"
+    ManagedBy = "Terraform-Platform-Owner"
   }
 }
 
@@ -333,6 +356,17 @@ resource "aws_instance" "app_server" {
   vpc_security_group_ids = [aws_security_group.app_sg.id]
   key_name               = var.ssh_key_name
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
+
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = [ami]
+  }
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 2
+  }
 
   root_block_device {
     volume_size           = 30

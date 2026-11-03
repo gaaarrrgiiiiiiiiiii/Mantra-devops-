@@ -1,73 +1,261 @@
 ---
-- name: Deploy Mantra Application Stack
+- name: Deploy Mantra application stack
   hosts: app_servers
-  become: yes
+  become: true
   vars:
     app_dir: /opt/mantra
+    backend_image: "{{ mantra_backend_image | mandatory }}"
+    ecr_registry: "{{ backend_image.split('/')[0] }}"
+    aws_region: us-east-1
 
   tasks:
-    - name: Update apt cache and install prerequisites
-      apt:
+    - name: Require an immutable ECR image reference
+      ansible.builtin.assert:
+        that:
+          - backend_image is match('^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/[a-z0-9_/-]+(:[a-f0-9]{40}|@sha256:[a-f0-9]{64})$')
+        fail_msg: "Supply an ECR image pinned to a full Git commit tag or SHA-256 digest."
+    - name: Install host prerequisites
+      ansible.builtin.apt:
         name:
-          - apt-transport-https
           - ca-certificates
           - curl
-          - gnupg
-          - git
-          - python3-pip
-        state: present
-        update_cache: yes
-
-    - name: Install Docker and Docker Compose plugin
-      apt:
-        name:
           - docker.io
           - docker-compose-v2
+          - awscli
+          - cron
         state: present
+        update_cache: true
 
-    - name: Ensure Docker service is enabled and running
-      systemd:
-        name: docker
+    - name: Enable Docker and cron
+      ansible.builtin.systemd:
+        name: "{{ item }}"
         state: started
-        enabled: yes
+        enabled: true
+      loop:
+        - docker
+        - cron
 
-    - name: Add ubuntu user to docker group
-      user:
-        name: ubuntu
-        groups: docker
-        append: yes
+    - name: Download the AWS CloudWatch agent
+      ansible.builtin.get_url:
+        url: https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+        dest: /tmp/amazon-cloudwatch-agent.deb
+        mode: '0644'
 
-    - name: Ensure app directory exists
-      file:
+    - name: Install the AWS CloudWatch agent
+      ansible.builtin.apt:
+        deb: /tmp/amazon-cloudwatch-agent.deb
+
+    - name: Configure host and container log collection
+      ansible.builtin.copy:
+        src: ../files/cloudwatch-agent.json
+        dest: /opt/aws/amazon-cloudwatch-agent/etc/mantra.json
+        owner: root
+        group: root
+        mode: '0644'
+      register: cloudwatch_config
+
+    - name: Start CloudWatch collection with the instance profile
+      ansible.builtin.command: >-
+        /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
+        -a fetch-config -m ec2 -s
+        -c file:/opt/aws/amazon-cloudwatch-agent/etc/mantra.json
+      changed_when: cloudwatch_config.changed
+
+    - name: Create application directory
+      ansible.builtin.file:
         path: "{{ app_dir }}"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0750'
+
+    - name: Copy deployment configuration
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ app_dir }}/{{ item | basename }}"
+        owner: ubuntu
+        group: ubuntu
+        mode: '0640'
+      loop:
+        - ../../docker-compose.yml
+        - ../../Caddyfile
+
+    - name: Copy monitoring configuration
+      ansible.builtin.copy:
+        src: "../../{{ item }}/"
+        dest: "{{ app_dir }}/{{ item }}/"
+        owner: ubuntu
+        group: ubuntu
+        mode: preserve
+      loop:
+        - prometheus
+        - grafana
+        - postgres
+
+    - name: Create frontend source directory
+      ansible.builtin.file:
+        path: "{{ app_dir }}/frontend"
         state: directory
         owner: ubuntu
         group: ubuntu
         mode: '0755'
 
-    - name: Copy docker-compose.yml to host
-      copy:
-        src: ../../docker-compose.yml
-        dest: "{{ app_dir }}/docker-compose.yml"
+    - name: Copy frontend sources without local secrets or node_modules
+      ansible.builtin.copy:
+        src: "../../frontend/{{ item }}"
+        dest: "{{ app_dir }}/frontend/{{ item }}"
         owner: ubuntu
         group: ubuntu
-        mode: '0644'
+        mode: preserve
+      loop:
+        - Dockerfile
+        - nginx.conf
+        - .dockerignore
+        - package.json
+        - package-lock.json
+        - index.html
+        - tsconfig.json
+        - tsconfig.app.json
+        - tsconfig.node.json
+        - vite.config.ts
+        - src/
+        - public/
 
-    - name: Pull and run Docker Compose stack
-      command: docker compose up -d --remove-orphans
+    - name: Check that production secrets were provisioned on the host
+      ansible.builtin.stat:
+        path: "{{ app_dir }}/.env"
+      register: production_env
+
+    - name: Require real production secrets
+      ansible.builtin.assert:
+        that:
+          - production_env.stat.exists
+          - production_env.stat.mode == '0600'
+        fail_msg: "Provision /opt/mantra/.env with real values and chmod 600 before deployment."
+
+    - name: Reject example secrets
+      ansible.builtin.command: grep -q CHANGE_ME "{{ app_dir }}/.env"
+      register: example_secrets
+      changed_when: false
+      failed_when: example_secrets.rc != 1
+
+    - name: Persist the deployed backend image for restarts and maintenance
+      ansible.builtin.lineinfile:
+        path: "{{ app_dir }}/.env"
+        regexp: '^MANTRA_BACKEND_IMAGE='
+        line: "MANTRA_BACKEND_IMAGE={{ backend_image }}"
+        mode: '0600'
+      no_log: true
+
+    - name: Authenticate Docker to ECR with the EC2 instance profile
+      ansible.builtin.shell: |
+        set -o pipefail
+        aws ecr get-login-password --region {{ aws_region }} | docker login --username AWS --password-stdin {{ ecr_registry }}
+      args:
+        executable: /bin/bash
+      no_log: true
+
+    - name: Pull the exact image produced by CI
+      ansible.builtin.command: docker compose --env-file .env pull backend
       args:
         chdir: "{{ app_dir }}"
-      become_user: ubuntu
+      environment:
+        MANTRA_BACKEND_IMAGE: "{{ backend_image }}"
 
-    - name: Verify application health check
-      uri:
-        url: http://localhost:8000/health
-        status_code: 200
-      register: health_result
-      until: health_result.status == 200
+    - name: Remove the temporary ECR login after pulling
+      ansible.builtin.command: "docker logout {{ ecr_registry }}"
+      changed_when: false
+
+    - name: Build frontend from the checked-out source
+      ansible.builtin.command: docker compose --env-file .env build frontend
+      args:
+        chdir: "{{ app_dir }}"
+      environment:
+        MANTRA_BACKEND_IMAGE: "{{ backend_image }}"
+
+    - name: Start storage before initializing pgvector
+      ansible.builtin.command: docker compose --env-file .env up -d --wait db redis
+      args:
+        chdir: "{{ app_dir }}"
+      environment:
+        MANTRA_BACKEND_IMAGE: "{{ backend_image }}"
+
+    - name: Enable pgvector for existing database volumes
+      ansible.builtin.command: >-
+        docker compose --env-file .env exec -T db
+        psql -v ON_ERROR_STOP=1 -U mantra_user -d mantra_db -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+      args:
+        chdir: "{{ app_dir }}"
+      environment:
+        MANTRA_BACKEND_IMAGE: "{{ backend_image }}"
+
+    - name: Detect an application-supplied migration package
+      ansible.builtin.command: >-
+        docker compose --env-file .env run --rm --no-deps backend
+        python -c 'from pathlib import Path; print(Path("alembic.ini").is_file())'
+      args:
+        chdir: "{{ app_dir }}"
+      environment:
+        MANTRA_BACKEND_IMAGE: "{{ backend_image }}"
+      register: migration_package
+      changed_when: false
+
+    - name: Apply application-supplied migrations before starting the API
+      ansible.builtin.command: docker compose --env-file .env run --rm --no-deps backend alembic upgrade head
+      args:
+        chdir: "{{ app_dir }}"
+      environment:
+        MANTRA_BACKEND_IMAGE: "{{ backend_image }}"
+      when: migration_package.stdout | trim == 'True'
+
+    - name: Start the stack without rebuilding the backend
+      ansible.builtin.command: docker compose --env-file .env up -d --no-build --remove-orphans
+      args:
+        chdir: "{{ app_dir }}"
+      environment:
+        MANTRA_BACKEND_IMAGE: "{{ backend_image }}"
+
+    - name: Install database backup script
+      ansible.builtin.copy:
+        src: ../../scripts/backup-db-to-s3.sh
+        dest: /usr/local/sbin/mantra-backup-db
+        owner: root
+        group: root
+        mode: '0750'
+
+    - name: Install Grafana credential synchronization script
+      ansible.builtin.copy:
+        src: ../../scripts/reset-grafana-password.py
+        dest: /usr/local/sbin/mantra-reset-grafana-password.py
+        owner: root
+        group: root
+        mode: '0750'
+
+    - name: Synchronize Grafana password for existing volumes
+      ansible.builtin.command: python3 /usr/local/sbin/mantra-reset-grafana-password.py
+      register: grafana_password_sync
+      until: grafana_password_sync.rc == 0
+      retries: 5
+      delay: 3
+      no_log: true
+
+    - name: Schedule daily database backups
+      ansible.builtin.cron:
+        name: Mantra PostgreSQL backup to S3
+        user: root
+        minute: '0'
+        hour: '2'
+        job: '/usr/local/sbin/mantra-backup-db >> /var/log/mantra-backup.log 2>&1'
+
+    - name: Verify backend readiness inside the container
+      ansible.builtin.command: >-
+        docker compose --env-file .env exec -T backend
+        python -c 'import urllib.request; urllib.request.urlopen("http://localhost:8000/ready", timeout=5)'
+      args:
+        chdir: "{{ app_dir }}"
+      environment:
+        MANTRA_BACKEND_IMAGE: "{{ backend_image }}"
+      register: readiness
+      until: readiness.rc == 0
       retries: 12
       delay: 5
-
-    - name: Output deployment success message
-      debug:
-        msg: "Mantra Application Stack is healthy and accessible at http://{{ ansible_host }}:8000"

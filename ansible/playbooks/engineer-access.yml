@@ -1,0 +1,18 @@
+---
+- name: Install individual engineer SSH public keys
+  hosts: app_servers
+  become: true
+  tasks:
+    - name: Require both engineer public keys
+      ansible.builtin.assert:
+        that:
+          - engineer_public_keys | length >= 2
+
+    - name: Authorize individual engineer keys while retaining recovery access
+      ansible.builtin.lineinfile:
+        path: /home/ubuntu/.ssh/authorized_keys
+        line: "{{ item }}"
+        owner: ubuntu
+        group: ubuntu
+        mode: '0600'
+      loop: "{{ engineer_public_keys }}"

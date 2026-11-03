@@ -1,209 +1,85 @@
-# Mantra Industrial Knowledge Intelligence Platform & DevOps Architecture
+# Mantra Industrial Knowledge Intelligence Platform
 
-[![Python 3.11](https://img.shields.io/badge/Python-3.11-blue.svg)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)](https://fastapi.tiangolo.com/)
-[![AWS](https://img.shields.io/badge/AWS-VPC%20%7C%20EC2%20%7C%20S3%20%7C%20ECR-FF9900.svg)](https://aws.amazon.com/)
-[![Terraform](https://img.shields.io/badge/Terraform-1.5+-7B42BC.svg)](https://www.terraform.io/)
-[![Docker](https://img.shields.io/badge/Docker-Compose%20v2-2496ED.svg)](https://www.docker.com/)
-[![Prometheus](https://img.shields.io/badge/Prometheus-v2.54.1-E6522C.svg)](https://prometheus.io/)
-[![Grafana](https://img.shields.io/badge/Grafana-v11.1.0-F46800.svg)](https://grafana.com/)
-[![CI/CD](https://img.shields.io/badge/CI%2FCD-Jenkins%20%7C%20GitHub%20Actions-brightgreen.svg)]()
+Mantra combines a FastAPI knowledge API and React frontend with a single-host AWS DevOps platform. The platform owner maintains infrastructure, deployment, CI and monitoring; the application owner maintains retrieval, ingestion, application tests and schema migrations.
 
-> A production-grade industrial knowledge retrieval platform engineered with an end-to-end cloud-native DevOps lifecycle: Infrastructure as Code (IaC), automated configuration management, continuous integration and delivery (CI/CD), containerization, and full-stack observability.
+See [PLATFORM_VERIFICATION.md](PLATFORM_VERIFICATION.md) for dated verification results and outstanding dependencies. The original [DevOps plan](MANTRA_DEVOPS_PLAN.md) describes the work allocation; its example credentials and historical topology are not production configuration.
 
----
-
-## 1. Live Deployment & Telemetry Endpoints
-
-The complete platform is deployed live on AWS EC2 (`t3.medium`) within a custom VPC:
-
-| Service / Component | Port | Live Endpoint | Status / Description |
-| :--- | :---: | :--- | :--- |
-| **FastAPI Backend (Liveness)** | `8000` | [`http://32.193.54.28:8000/health`](http://32.193.54.28:8000/health) | `{"status":"healthy","service":"mantra-backend",...}` |
-| **Service Readiness Probe** | `8000` | [`http://32.193.54.28:8000/ready`](http://32.193.54.28:8000/ready) | `{"status":"ready","database":"connected","redis":"connected"}` |
-| **Prometheus Metrics Hook** | `8000` | [`http://32.193.54.28:8000/metrics`](http://32.193.54.28:8000/metrics) | Real-time RED metrics, HTTP throughput, latency, GC & memory |
-| **Grafana Monitoring Dashboard** | `3000` | [`http://32.193.54.28:3000`](http://32.193.54.28:3000) | Pre-provisioned *"Mantra Industrial DevOps Overview"* (`admin` / `mantra_admin_2026`) |
-| **Prometheus Server & Targets** | `9090` | [`http://32.193.54.28:9090/targets`](http://32.193.54.28:9090/targets) | Active scrape targets (`mantra-backend` & `prometheus` **UP**) + Alert rules |
-| **API Documentation (Swagger)** | `8000` | [`http://32.193.54.28:8000/docs`](http://32.193.54.28:8000/docs) | Interactive OpenAPI / Swagger interface |
-
----
-
-## 2. 2-Engineer Collaborative DevOps Model
-
-The project is built on an industry-standard collaborative DevOps division between the **Platform Owner** and the **Application Owner**:
-
-```
-               ┌────────────────────────────────────────────────────────┐
-               │                MANTRA DEVOPS PLATFORM                  │
-               └────────────────────────────────────────────────────────┘
-                       │                                        │
-                       ▼                                        ▼
-      ┌─────────────────────────────────┐      ┌─────────────────────────────────┐
-      │   TEAMMATE: Application Owner   │      │      YOU: Platform Owner        │
-      │         (Ayush Gourav)          │      │            (Gargi)              │
-      ├─────────────────────────────────┤      ├─────────────────────────────────┤
-      │ • FastAPI backend & API routers │      │ • AWS VPC, Subnets, EC2, SG    │
-      │ • PostgreSQL + pgvector + Redis │      │ • Terraform IaC (S3 Backend)    │
-      │ • Multi-stage Dockerfile        │      │ • Ansible provisioning playbook │
-      │ • Pytest suite (tests/)         │      │ • Jenkins CI/CD & AWS ECR       │
-      │ • Telemetry /metrics endpoint   │      │ • Prometheus & Grafana stack    │
-      │ • React + Vite frontend         │      │ • Scoped IAM Policies & Access  │
-      └─────────────────────────────────┘      └─────────────────────────────────┘
-```
-
----
-
-## 3. High-Level DevOps & Cloud Architecture
+## Architecture
 
 ```mermaid
 flowchart TD
-    subgraph DEVELOPER_WORKFLOW ["1. Collaborative Development & VCS"]
-        Dev1["Engineer 1: Application Code<br>(FastAPI, Models, Pytest)"]
-        Dev2["Engineer 2: Platform Code<br>(Terraform, Ansible, Observability)"]
-        GitHub["GitHub Repository<br>(gaaarrrgiiiiiiiiiii/Mantra-devops-)"]
-        Dev1 -->|PR / Push| GitHub
-        Dev2 -->|PR / Push| GitHub
+    GitHub[GitHub main branch] -->|SCM polling| Jenkins
+    subgraph Host[Mantra EC2: Ubuntu t3.medium]
+        Jenkins[Jenkins: loopback 8080] --> Tests[Build, pytest, Bandit, Trivy]
+        Tests --> Deploy[Ansible exact image deployment]
+        Caddy[Caddy: public 80/443] --> Frontend[React SPA / Nginx]
+        Caddy -->|Authenticated gateway / server-side API key| API[FastAPI]
+        API --> Postgres[(PostgreSQL + pgvector)]
+        API --> Redis[(Redis)]
+        Prometheus -->|metrics| API
+        Grafana --> Prometheus
+        Prometheus --> Alertmanager
+        Agent[CloudWatch agent]
+        Backup[Daily pg_dump]
     end
-
-    subgraph CICD_AUTOMATION ["2. Continuous Integration & Delivery"]
-        Jenkins["Jenkins Pipeline / GitHub Actions"]
-        Pytest["Step 1: Run Pytest Suite<br>(pytest tests/ -v)"]
-        ECR["Step 2: Build & Push Docker Image<br>(Amazon ECR: mantra-backend)"]
-        Ansible["Step 3: Trigger Ansible Deploy<br>(deploy.yml on EC2)"]
-        Smoke["Step 4: Live Healthcheck Smoke Test<br>(curl :8000/health)"]
-
-        GitHub --> Jenkins
-        Jenkins --> Pytest
-        Pytest --> ECR
-        ECR --> Ansible
-        Ansible --> Smoke
-    end
-
-    subgraph AWS_CLOUD ["3. AWS Cloud Infrastructure (Provisioned via Terraform)"]
-        subgraph VPC ["Mantra Custom VPC (10.0.0.0/16)"]
-            Subnet["Public Subnet (10.0.1.0/24)"]
-            SG["Security Group (22, 80, 443, 8000, 3000, 9090)"]
-
-            subgraph EC2 ["EC2 Host (t3.medium Ubuntu 22.04 LTS)"]
-                subgraph DOCKER_COMPOSE ["Docker Compose v2 Multi-Container Stack"]
-                    Backend["FastAPI Backend<br>(mantra-backend:8000)"]
-                    DB[("PostgreSQL 16 + pgvector<br>(mantra-db:5432)")]
-                    Redis[("Redis 7 Cache<br>(mantra-redis:6379)")]
-                    Prom["Prometheus v2.54.1<br>(mantra-prometheus:9090)"]
-                    Graf["Grafana v11.1.0<br>(mantra-grafana:3000)"]
-
-                    Backend <-->|Store & Vector Search| DB
-                    Backend <-->|Exact Cache| Redis
-                    Prom -->|Scrape :8000/metrics every 15s| Backend
-                    Graf -->|Query Datasource| Prom
-                end
-            end
-        end
-
-        S3[("Amazon S3 Bucket<br>mantra-industrial-docs")]
-        IAM["IAM Instance Profile<br>(mantra-ec2-instance-role)"]
-        DevUser["Scoped IAM User<br>(mantra-engineer1-app-owner)"]
-
-        Backend -->|boto3 IAM-Friendly Auth| S3
-        EC2 --- IAM
-        DevUser -.->|Least Privilege Policy| S3
-    end
-
-    Ansible -->|SSH Deploy| EC2
-    ECR -->|Pull Latest Image| Backend
+    Tests --> ECR[Private ECR: immutable commit tags]
+    ECR --> Deploy
+    Deploy --> API
+    API --> S3[(S3 documents)]
+    Backup --> S3
+    Alertmanager --> SNS[SNS confirmed email subscription]
+    Agent --> CloudWatch[CloudWatch logs and host metrics]
 ```
 
----
+Only the gateway is public. SSH requires the configured operator CIDR. Databases have no host port bindings. Monitoring ports bind to loopback, and Jenkins listens on `127.0.0.1:8080`. The instance profile supplies AWS credentials; access keys are not embedded in application configuration.
 
-## 4. Key Architectural Pillars
+## Configuration and access
 
-### A. Infrastructure as Code (Terraform)
-* **Remote State Management:** Configured with an S3 backend (`mantra-terraform-state-2026`) and DynamoDB state locking (`mantra-terraform-locks`).
-* **Network Topology:** Isolated VPC (`10.0.0.0/16`), public subnet (`10.0.1.0/24`), Internet Gateway, and Route Tables.
-* **Security Groups:** Strictly controlled ingress allowing ports `22` (SSH), `80/443` (HTTP/S), `8000` (FastAPI), `3000` (Grafana), and `9090` (Prometheus). Database ports `5432` and `6379` remain completely isolated inside the Docker bridge network.
-* **Managed Cloud Storage & Registry:** S3 bucket (`mantra-industrial-docs-657157860151`) with AES-256 server-side encryption, versioning, and public access blocks; private Amazon ECR repository (`mantra-backend`).
+Copy `.env.example` to `.env`, replace every placeholder, and protect it with `chmod 600`. Use URL-safe database passwords because the connection URL embeds the password. Generate the gateway's bcrypt hash using `caddy hash-password`; preserve its dollar signs by single-quoting the `.env` value. Keep runtime credentials outside Git. Existing deployments use `/opt/mantra/.env`.
 
-### B. Security & IAM Least-Privilege Access
-* **EC2 IAM Role (`mantra-ec2-instance-role`):** Directly attached via an IAM Instance Profile. Authorizes the application to interact with S3, pull from ECR, and stream logs to CloudWatch without storing AWS access keys in environment variables or code.
-* **Scoped Developer User (`mantra-engineer1-app-owner`):** Dedicated IAM user for Engineer 1 attached to `mantra-engineer1-developer-policy`. Restricts access exclusively to industrial document storage and log streams, barring access to modify compute or network infrastructure.
+`MANTRA_SITE_ADDRESS=:80` provides HTTP for local setup. Production can use the permanent public IP with Let's Encrypt's `shortlived` certificate profile, or a DNS hostname whose A record points at the Elastic IP. Caddy renews certificates automatically. Verify the issued certificate before claiming HTTPS is operational. [IP certificates](https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability), [Caddy HTTPS documentation](https://caddyserver.com/docs/automatic-https).
 
-### C. Multi-Container Orchestration (Docker Compose)
-* **Service Composition:** 5 coordinated services (`backend`, `db`, `redis`, `prometheus`, `grafana`).
-* **Resilience:** All production containers configured with `restart: unless-stopped` for automatic self-healing across host reboots.
-* **Startup Ordering:** Docker health checks (`pg_isready -U mantra_user -d mantra_db` and `redis-cli ping`) ensure the FastAPI backend boots only after storage dependencies report healthy (`condition: service_healthy`).
+The frontend and `/api/*` use gateway Basic authentication. The gateway adds the backend API key only after authentication. `/health` and `/ready` are public probes. Monitoring credentials are separate. A future application token flow can replace gateway authentication.
 
-### D. Observability & Alerting Stack
-* **Prometheus:** Continuously scrapes `/metrics` from `backend:8000` on a 15-second cycle. Includes pre-loaded alert rules in `prometheus/alert.rules.yml` for:
-  * `MantraBackendDown`: Fires if `up{job="mantra-backend"} == 0` for $\ge 1$ minute.
-  * `MantraHighErrorRate`: Fires if 5xx responses exceed 5% of total traffic.
-* **Grafana:** Automated provisioning (`grafana/provisioning/`) with Prometheus auto-registered as default datasource, and a pre-configured dashboard displaying:
-  * Service uptime and health badges
-  * HTTP Request throughput & RED metrics
-  * Latency percentiles ($p50$ and $p95$)
-  * Process memory (RSS vs. Virtual) and CPU utilization
+For an existing deployment, rotated web and Grafana credentials are stored only in `/root/mantra-access.json`; retrieve them privately over SSH with `sudo`. The Jenkins username is `mantra-admin`; its generated password is in `/var/lib/jenkins/secrets/mantra-admin-password`. Neither file should be copied into chat, Git or screenshots.
 
-### E. Automated CI/CD Pipelines
-* **Jenkins Pipeline (`Jenkinsfile`):** Automated stages covering Code Checkout $\rightarrow$ Virtualenv Setup & Pytest Execution $\rightarrow$ Static Code Quality Gate $\rightarrow$ Multi-stage Docker Build & ECR Push $\rightarrow$ Remote Ansible Deployment $\rightarrow$ Endpoint Smoke Testing.
-* **GitHub Actions (`.github/workflows/ci-cd.yml`):** Synchronous pull request and push validation on `main`.
+Create private tunnels from your workstation:
 
----
-
-## 5. Repository Structure
-
-```text
-Mantra/
-├── .github/workflows/
-│   └── ci-cd.yml                   # GitHub Actions automated CI/CD pipeline
-├── Jenkinsfile                     # Declarative Jenkins CI/CD pipeline
-├── docker-compose.yml              # 5-tier production multi-container orchestration
-├── MANTRA_DEVOPS_PLAN.md           # 2-Engineer operational playbook & collaboration contract
-├── README.md                       # Platform overview, architecture diagrams, & endpoints
-├── backend/
-│   ├── Dockerfile                  # Multi-stage production container image (non-root appuser)
-│   ├── requirements.txt            # Pinned application dependencies
-│   └── app/
-│       ├── main.py                 # FastAPI application, /health, /ready, & /metrics hooks
-│       ├── config.py               # Pydantic BaseSettings 12-factor configuration
-│       ├── database.py             # PostgreSQL + pgvector connection pool
-│       └── storage.py              # IAM-compatible S3 document storage abstraction
-├── frontend/                       # React + TypeScript + Vite user interface
-├── tests/
-│   ├── conftest.py                 # Pytest fixtures and mock client
-│   └── test_health.py              # Liveness and readiness smoke tests (100% passing)
-├── terraform/
-│   ├── backend.tf                  # S3 remote state + DynamoDB distributed lock
-│   ├── providers.tf                # HashiCorp AWS provider
-│   ├── main.tf                     # VPC, Subnet, IGW, SecGroup, EC2, S3, ECR, IAM
-│   ├── variables.tf                # Configurable infrastructure parameters
-│   └── outputs.tf                  # Public IP, bucket names, and resource identifiers
-├── ansible/
-│   ├── inventory/
-│   │   └── hosts.ini               # EC2 target host connection configuration
-│   └── playbooks/
-│       └── deploy.yml              # Automated host provisioning & compose sync playbook
-├── prometheus/
-│   ├── prometheus.yml              # Scrape configuration targeting backend:8000/metrics
-│   └── alert.rules.yml             # Threshold-based alerting rules
-└── grafana/
-    └── provisioning/
-        ├── datasources/            # Automated Prometheus datasource registration
-        └── dashboards/             # Pre-loaded "Mantra Industrial DevOps Overview" dashboard
-```
-
----
-
-## 6. Local Quickstart
-
-### Run Test Suite Locally
 ```bash
-python -m pip install -r backend/requirements.txt pytest httpx
-pytest tests/ -v
+ssh -i ~/.ssh/mantra-key.pem -L 8080:127.0.0.1:8080 -L 3000:127.0.0.1:3000 -L 9090:127.0.0.1:9090 ubuntu@32.193.54.28
 ```
 
-### Run Entire Stack with Docker Compose
+Jenkins is then available at `http://localhost:8080`, Grafana at `http://localhost:3000/grafana/`, and Prometheus at `http://localhost:9090`.
+
+## Infrastructure and deployment
+
 ```bash
-docker compose up -d --build
+cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+# Set a restricted SSH CIDR, actual bucket name and alert email.
+terraform -chdir=terraform init
+terraform -chdir=terraform plan
+terraform -chdir=terraform apply
+ansible-playbook -i ansible/inventory/hosts.ini ansible/playbooks/jenkins.yml
+scripts/deploy-ec2.sh ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/mantra-backend:FULL_GIT_COMMIT
 ```
-* Backend API: `http://localhost:8000/docs`
-* Grafana: `http://localhost:3000`
-* Prometheus: `http://localhost:9090`
+
+The Terraform S3 backend and DynamoDB lock table must already exist. Backend state is encrypted. EC2 replacement is guarded; AMI changes require a deliberate upgrade. The Ansible deployment copies the required sources and configuration, pulls the exact ECR image, enables pgvector on existing volumes, synchronizes Grafana credentials, schedules backups and waits for actual database/Redis readiness.
+
+Jenkins polls the configured repository's `main` branch every five minutes. Its pipeline builds a Python 3.11 runtime image, runs pytest in that image, runs Bandit and Trivy, pushes a commit tag, and deploys through a dedicated SSH credential. Trivy retains every high/critical finding and blocks findings with available fixes; vendor-unpatched findings remain in the archived report. The controller uses its EC2 role for scoped ECR push access. GitHub Actions runs independent pull request validation. Do not run both systems as competing deployment controllers.
+
+Schema migrations remain an application handoff: this repository currently has no Alembic migration directory. Ansible detects `/app/alembic.ini` in the runtime image and runs `alembic upgrade head` before starting the API when the application owner supplies that package. Turn `IKI_AUTO_CREATE_SCHEMA` off when adopting migrations; until then the current schema bootstrap remains enabled.
+
+## Verification and recovery
+
+```bash
+python -m pytest tests -q
+terraform fmt -check -recursive terraform
+terraform -chdir=terraform validate
+docker compose --env-file .env.example config --quiet
+```
+
+`scripts/validate-containers.sh` runs an isolated eight-service stack on loopback test ports, verifies authentication, SPA routing, real dependency failures, metrics, pgvector, port isolation and database restore, then removes only its disposable project volumes. Run it from an extracted package, not `/opt/mantra`.
+
+Production backups run daily at 07:30 Asia/Kolkata (02:00 UTC) through `/usr/local/sbin/mantra-backup-db`. Verify recovery with `scripts/verify-backup-restore.sh s3://BUCKET/backups/FILE.sql.gz`; it restores into a disposable database and does not replace production data. Backup logs are collected in CloudWatch.
+
+Alertmanager routes alerts to the Terraform-managed SNS topic. The email recipient must confirm the subscription before delivery can be verified. [Prometheus receiver configuration](https://prometheus.io/docs/alerting/latest/configuration/).

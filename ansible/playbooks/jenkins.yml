@@ -1,0 +1,171 @@
+---
+- name: Configure a private Jenkins controller on the Mantra EC2 host
+  hosts: app_servers
+  become: true
+  tasks:
+    - name: Install controller prerequisites
+      ansible.builtin.apt:
+        name: [openjdk-21-jre-headless, git, python3-venv, python3-pip, ansible, docker.io, awscli, acl]
+        state: present
+        update_cache: true
+
+    - name: Create apt keyring directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Install Jenkins repository signing key
+      ansible.builtin.get_url:
+        url: https://pkg.jenkins.io/debian-stable/jenkins.io-2026.key
+        dest: /etc/apt/keyrings/jenkins-keyring.asc
+        mode: '0644'
+
+    - name: Configure Jenkins stable repository
+      ansible.builtin.apt_repository:
+        repo: deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/
+        filename: jenkins
+
+    - name: Install Jenkins without starting an unconfigured controller
+      ansible.builtin.apt:
+        name: jenkins
+        state: present
+        policy_rc_d: 101
+
+    - name: Stop Jenkins during bootstrap
+      ansible.builtin.systemd:
+        name: jenkins
+        state: stopped
+
+    - name: Allow the trusted controller to build Docker images
+      ansible.builtin.user:
+        name: jenkins
+        groups: docker
+        append: true
+
+    - name: Create Jenkins configuration directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: jenkins
+        group: jenkins
+        mode: '0700'
+      loop:
+        - /var/lib/jenkins/secrets
+        - /var/lib/jenkins/.ssh
+        - /var/lib/jenkins/init.groovy.d
+        - /var/lib/jenkins/plugins
+
+    - name: Generate an admin password once
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "import os,secrets; fd=os.open('/var/lib/jenkins/secrets/mantra-admin-password',os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600); os.write(fd,secrets.token_urlsafe(32).encode()); os.close(fd)"
+        creates: /var/lib/jenkins/secrets/mantra-admin-password
+      become_user: jenkins
+      no_log: true
+
+    - name: Generate a dedicated deployment key once
+      ansible.builtin.command:
+        argv: [ssh-keygen, -q, -t, ed25519, -N, '', -C, mantra-jenkins, -f, /var/lib/jenkins/.ssh/id_ed25519]
+        creates: /var/lib/jenkins/.ssh/id_ed25519
+      become_user: jenkins
+
+    - name: Read the deployment public key
+      ansible.builtin.slurp:
+        src: /var/lib/jenkins/.ssh/id_ed25519.pub
+      register: deploy_key
+
+    - name: Authorize the dedicated Jenkins key
+      ansible.builtin.lineinfile:
+        path: /home/ubuntu/.ssh/authorized_keys
+        line: "{{ deploy_key.content | b64decode | trim }}"
+        owner: ubuntu
+        group: ubuntu
+        mode: '0600'
+
+    - name: Read the local SSH host public key
+      ansible.builtin.slurp:
+        src: /etc/ssh/ssh_host_ed25519_key.pub
+      register: host_key
+
+    - name: Pin the host key for Jenkins local deployment
+      ansible.builtin.copy:
+        content: "localhost,127.0.0.1 {{ host_key.content | b64decode | trim }}\n"
+        dest: /var/lib/jenkins/.ssh/known_hosts
+        owner: jenkins
+        group: jenkins
+        mode: '0600'
+
+    - name: Create systemd override directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/jenkins.service.d
+        state: directory
+        mode: '0755'
+
+    - name: Bind Jenkins to loopback and limit controller memory
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/jenkins.service.d/mantra.conf
+        mode: '0644'
+        content: |
+          [Service]
+          Environment="JENKINS_OPTS=--httpListenAddress=127.0.0.1"
+          Environment="JAVA_OPTS=-Djava.awt.headless=true -Djenkins.install.runSetupWizard=false -Xmx768m"
+
+    - name: Install the plugin manager
+      ansible.builtin.get_url:
+        url: https://github.com/jenkinsci/plugin-installation-manager-tool/releases/download/2.15.0/jenkins-plugin-manager-2.15.0.jar
+        dest: /usr/local/lib/jenkins-plugin-manager.jar
+        mode: '0644'
+
+    - name: Copy plugin list
+      ansible.builtin.copy:
+        src: ../../jenkins/plugins.txt
+        dest: /var/lib/jenkins/plugins.txt
+        owner: jenkins
+        group: jenkins
+        mode: '0644'
+
+    - name: Install pipeline and Git plugins
+      ansible.builtin.command: >-
+        java -jar /usr/local/lib/jenkins-plugin-manager.jar
+        --war /usr/share/java/jenkins.war
+        --plugin-download-directory /var/lib/jenkins/plugins
+        --plugin-file /var/lib/jenkins/plugins.txt
+      become_user: jenkins
+
+    - name: Configure security, credentials and the Mantra pipeline
+      ansible.builtin.copy:
+        src: ../../jenkins/10-mantra.groovy
+        dest: /var/lib/jenkins/init.groovy.d/10-mantra.groovy
+        owner: jenkins
+        group: jenkins
+        mode: '0600'
+
+    - name: Install a container-based Trivy command
+      ansible.builtin.copy:
+        dest: /usr/local/bin/trivy
+        owner: root
+        group: root
+        mode: '0755'
+        content: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v mantra-trivy-cache:/root/.cache/ -v "$PWD:/work" -w /work aquasec/trivy@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c "$@"
+
+    - name: Start the private Jenkins controller
+      ansible.builtin.systemd:
+        name: jenkins
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Verify Jenkins responds on loopback
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/login
+        status_code: 200
+      register: jenkins_ready
+      until: jenkins_ready.status == 200
+      retries: 30
+      delay: 5
