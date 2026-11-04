@@ -46,11 +46,7 @@ pipeline {
         stage('Test exact runtime image') {
             steps {
                 sh '''
-                    docker run --rm -v "$WORKSPACE/tests:/tests:ro" \
-                      -e IKI_ENVIRONMENT=test -e IKI_REQUIRE_API_KEY=false \
-                      -e IKI_REPOSITORY_BACKEND=memory -e IKI_LOCAL_STORAGE_PATH=/tmp/test-storage \
-                      "${ECR_REGISTRY}/${IMAGE_NAME}:${GIT_COMMIT}" \
-                      python -m pytest /tests -v -p no:cacheprovider
+                    bash scripts/test-runtime-image.sh "${ECR_REGISTRY}/${IMAGE_NAME}:${GIT_COMMIT}"
                 '''
             }
         }

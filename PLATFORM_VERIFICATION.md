@@ -63,7 +63,7 @@ Use the complete [application checklist](APPLICATION_ENGINEER_CHECKLIST.md) and 
 - [ ] Correct deployed schema: `document_chunks.embedding` and `ts_content` are absent despite native retrieval code expecting them. Supply versioned migrations, existing-data backfills and tests. Ansible detects `/app/alembic.ini` and runs `alembic upgrade head` when packaged; disable automatic schema creation when adopting migrations.
 - [ ] Accept the broader application tests and features on the merged/deployed release, reconcile dependencies, and explicitly scope any asynchronous worker delivery.
 - [ ] Teammate confirms own-device SSM sign-in; platform owner confirms transcript delivery. No shared administrator private key is required.
-- [ ] Agree/configure required GitHub reviews/checks and branch protection; canonical `main` was unprotected at inspection.
+- [x] Implement platform CODEOWNERS, required review/check protection tooling, PostgreSQL/frontend CI and migration/release gates. Verify actual GitHub settings with `scripts/github-platform.py audit`; see [platform implementation record](PLATFORM_ENGINEER_CLOSEOUT.md).
 
 The platform infrastructure verification is distinct from application acceptance. The latest read-only runtime audit reports hashing embeddings and deterministic answers; confirm those modes meet the agreed release scope. Health 200 does not establish retrieval quality or complete product functionality.
 

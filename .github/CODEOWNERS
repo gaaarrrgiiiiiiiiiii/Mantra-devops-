@@ -1,0 +1,17 @@
+# Platform changes require the platform owner's review.
+# Application contributions continue through fork PRs; Bazzin07 currently has
+# read access to this repository and is therefore not a valid code owner here.
+/.github/ @gaaarrrgiiiiiiiiiii
+/terraform/ @gaaarrrgiiiiiiiiiii
+/ansible/ @gaaarrrgiiiiiiiiiii
+/jenkins/ @gaaarrrgiiiiiiiiiii
+/scripts/ @gaaarrrgiiiiiiiiiii
+/Jenkinsfile @gaaarrrgiiiiiiiiiii
+/docker-compose.yml @gaaarrrgiiiiiiiiiii
+/Caddyfile @gaaarrrgiiiiiiiiiii
+/prometheus/ @gaaarrrgiiiiiiiiiii
+/grafana/ @gaaarrrgiiiiiiiiiii
+/backend/Dockerfile @gaaarrrgiiiiiiiiiii
+/frontend/Dockerfile @gaaarrrgiiiiiiiiiii
+/frontend/nginx.conf @gaaarrrgiiiiiiiiiii
+/.env.example @gaaarrrgiiiiiiiiiii
