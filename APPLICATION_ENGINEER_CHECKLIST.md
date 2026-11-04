@@ -1,6 +1,6 @@
 # Application delivery and acceptance checklist
 
-Updated 4 November 2026. The platform owner has taken over the remaining implementation. Teammate contributions from PR #3 are preserved in [integration PR #4](https://github.com/gaaarrrgiiiiiiiiiii/Mantra-devops-/pull/4). Checkmarks below distinguish candidate implementation from deployed acceptance. Production remains on the previous platform release until review and promotion.
+Updated 4 November 2026. The platform owner completed the remaining implementation. Teammate contributions from PR #3 were integrated through [PR #4](https://github.com/gaaarrrgiiiiiiiiiii/Mantra-devops-/pull/4), reviewed by Bazzin07, merged and deployed. See [RELEASE_ACCEPTANCE.md](RELEASE_ACCEPTANCE.md) for current production evidence and remaining scope limits.
 
 See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md), [IMPLEMENTATION_RESULTS.md](IMPLEMENTATION_RESULTS.md) and [TEAM_ACCESS_AND_REMOTE_ACCEPTANCE.md](TEAM_ACCESS_AND_REMOTE_ACCEPTANCE.md).
 
@@ -27,17 +27,18 @@ The exact candidate image passed **68 tests**, including real PostgreSQL tests, 
 
 ## Required before production completion
 
-- [ ] All four required checks pass on the final integrated PR source: schema-contract, test, frontend-build and docker-build.
-- [ ] Independent reviewer with repository write access reviews and approves the final PR. The implementation author cannot self-approve.
-- [ ] Accepted source merges into protected canonical main.
-- [ ] Jenkins builds/tests/scans that merged commit, publishes its immutable ECR image and deploys it with required migrations.
-- [ ] Confirm pre-migration backup, live Alembic revision, existing-data integrity, gateway behavior and agreed functional acceptance on deployed HTTPS.
-- [ ] Match main SHA, Jenkins build, ECR digest and running image; record final joint/reviewer acceptance.
+- [x] All four required checks pass on merged main: schema-contract, test, frontend-build and docker-build.
+- [x] Independent writer Bazzin07 approved the source before merge.
+- [x] Accepted source merged into protected main as `c4c3dcf`.
+- [x] Jenkins #6 built/tested/scanned/published/deployed that exact commit and ran migrations.
+- [x] Pre-migration backup, live revision, data preservation, gateway behavior and representative HTTPS acceptance passed; post-migration backup restoration passed.
+- [x] Main SHA, Jenkins build, ECR digest and running image match; automated release evidence and reviewer acceptance are recorded.
+- [ ] Independently review/merge the focused future-deployment automation repair in PR #5. The live gateway configuration has already been repaired and verified.
 
 ## Access handoff
 
 - [x] Application IAM/SSM policy and non-admin `mantra-app` Linux account are provisioned and platform-tested.
-- [ ] Teammate accepts collaborator access if they will review or continue implementation; last API inspection reported read access.
+- [x] Teammate accepted collaborator access; GitHub reports write permission and their PR #4 approval is recorded.
 - [ ] Teammate confirms own-device SSM login and CloudWatch session transcript if they need server access. The platform owner cannot impersonate this user journey.
 - [ ] Each developer keeps their own clone, test configuration and private credentials. Never share the operator administrator SSH key or production environment file.
 

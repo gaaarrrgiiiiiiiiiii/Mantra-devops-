@@ -5,7 +5,7 @@ image=${1:?Supply the exact backend image reference}
 test_id="mantra-ci-$(cat /proc/sys/kernel/random/uuid | cut -c1-12)"
 db_name="${test_id}-db"
 cleanup() {
-    docker rm -f "$db_name" >/dev/null 2>&1 || true
+    docker rm -f -v "$db_name" >/dev/null 2>&1 || true
     docker network rm "$test_id" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT

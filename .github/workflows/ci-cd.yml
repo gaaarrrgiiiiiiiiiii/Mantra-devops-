@@ -89,6 +89,12 @@ jobs:
         run: |
           docker run --rm mantra-backend:${{ github.sha }} python -c "from pathlib import Path; assert Path('/app/alembic.ini').is_file(); assert Path('/app/migrations/env.py').is_file()"
           docker run --rm mantra-backend:${{ github.sha }} alembic heads
+      - name: Verify exact runtime image and disposable database cleanup
+        run: |
+          docker volume ls -q | sort > /tmp/mantra-volumes-before
+          bash scripts/test-runtime-image.sh mantra-backend:${{ github.sha }}
+          docker volume ls -q | sort > /tmp/mantra-volumes-after
+          diff /tmp/mantra-volumes-before /tmp/mantra-volumes-after
       - name: Scan image
         run: |
           scanner=aquasec/trivy@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c

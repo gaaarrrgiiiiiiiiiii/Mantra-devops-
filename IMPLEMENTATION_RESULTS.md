@@ -2,6 +2,8 @@
 
 Implementation date: 4 November 2026, Asia/Kolkata. Source: `platform/application-acceptance`, PR #4. Production promotion remains subject to independent review and the protected-main workflow.
 
+Production update: PR #4 was approved by Bazzin07, merged as `c4c3dcf`, and deployed by Jenkins #6. Live migrations, application acceptance and backup restore passed. See [RELEASE_ACCEPTANCE.md](RELEASE_ACCEPTANCE.md); the pre-deployment requirements below are retained as implementation history.
+
 ## Delivered
 
 - Packaged, versioned Alembic baseline and native retrieval migration, with 768-dimensional pgvector columns, generated full-text search, saved-vector/cache backfills and GIN/HNSW indexes. No existing documents or JSON embeddings are dropped.
