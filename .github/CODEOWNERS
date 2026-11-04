@@ -1,6 +1,5 @@
-# Platform changes require the platform owner's review.
-# Application contributions continue through fork PRs; Bazzin07 currently has
-# read access to this repository and is therefore not a valid code owner here.
+# Platform paths are assigned to the platform maintainer.
+# Repository access and required review rules are managed in GitHub settings.
 /.github/ @gaaarrrgiiiiiiiiiii
 /terraform/ @gaaarrrgiiiiiiiiiii
 /ansible/ @gaaarrrgiiiiiiiiiii
