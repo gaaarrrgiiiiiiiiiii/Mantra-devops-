@@ -38,7 +38,12 @@ compose() { docker compose -p mantra-platform-verify --env-file .env "$@"; }
 cleanup() { compose down --volumes --remove-orphans; }
 trap cleanup EXIT
 compose config --quiet
-compose build backend frontend
+if [ "${MANTRA_VALIDATION_REUSE_IMAGES:-0}" = 1 ]; then
+    # Only for rerunning checks against images already built from this checkout.
+    docker image inspect mantra-backend:platform-validation mantra-platform-verify-frontend >/dev/null
+else
+    compose build backend frontend
+fi
 compose run --rm --no-deps -e IKI_ENVIRONMENT=test -e IKI_REQUIRE_API_KEY=false -e IKI_REPOSITORY_BACKEND=memory -e IKI_REDIS_URL= -e IKI_STORAGE_BACKEND=local -e IKI_LOCAL_STORAGE_PATH=/tmp/test-storage -v "$PWD/tests:/tests:ro" backend python -m pytest /tests -q -p no:cacheprovider
 compose run --rm --no-deps --entrypoint promtool prometheus check config /etc/prometheus/prometheus.yml
 compose run --rm --no-deps --entrypoint amtool alertmanager check-config /etc/alertmanager/alertmanager.yml

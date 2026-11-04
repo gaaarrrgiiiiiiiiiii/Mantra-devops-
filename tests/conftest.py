@@ -19,6 +19,7 @@ def client(tmp_path):
         _env_file=None,
         environment="test",
         repository_backend="sqlite",
+        auto_create_schema=True,
         database_url=f"sqlite+aiosqlite:///{tmp_path / 'test.db'}",
         storage_backend="local",
         local_storage_path=str(tmp_path / "storage"),
