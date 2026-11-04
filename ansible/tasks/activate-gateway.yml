@@ -1,0 +1,40 @@
+---
+- name: Read desired gateway configuration checksum
+  ansible.builtin.stat:
+    path: "{{ app_dir }}/Caddyfile"
+    checksum_algorithm: sha256
+  register: desired_gateway_configuration
+
+- name: Read gateway's active mounted configuration checksum
+  ansible.builtin.command: docker compose --env-file .env exec -T gateway sha256sum /etc/caddy/Caddyfile
+  args:
+    chdir: "{{ app_dir }}"
+  environment:
+    MANTRA_BACKEND_IMAGE: "{{ backend_image }}"
+  register: mounted_gateway_configuration
+  changed_when: false
+  failed_when: false
+
+- name: Detect changed or stale gateway configuration
+  ansible.builtin.set_fact:
+    activate_gateway_configuration: >-
+      {{ (deployment_configuration.changed | default(false)) or
+         mounted_gateway_configuration.rc != 0 or
+         desired_gateway_configuration.stat.checksum not in mounted_gateway_configuration.stdout }}
+
+- name: Validate desired gateway configuration before activation
+  ansible.builtin.command: docker compose --env-file .env run --rm --no-deps gateway caddy validate --config /etc/caddy/Caddyfile
+  args:
+    chdir: "{{ app_dir }}"
+  environment:
+    MANTRA_BACKEND_IMAGE: "{{ backend_image }}"
+  changed_when: false
+  when: activate_gateway_configuration | bool
+
+- name: Recreate gateway to activate changed file mounts and routing
+  ansible.builtin.command: docker compose --env-file .env up -d --no-deps --force-recreate gateway
+  args:
+    chdir: "{{ app_dir }}"
+  environment:
+    MANTRA_BACKEND_IMAGE: "{{ backend_image }}"
+  when: activate_gateway_configuration | bool

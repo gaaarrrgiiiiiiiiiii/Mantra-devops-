@@ -45,7 +45,7 @@ jobs:
           python-version: '3.11'
           cache: pip
       - name: Install dependencies
-        run: pip install -r backend/requirements.lock 'bandit>=1.8,<2'
+        run: pip install -r backend/requirements.lock 'bandit>=1.8,<2' 'ansible-core>=2.17,<2.20'
       - name: Install document runtime tools
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr poppler-utils fonts-dejavu-core
       - name: Run tests
@@ -58,6 +58,8 @@ jobs:
         run: bandit -r backend/app -q
       - name: Verify alert thresholds and timing
         run: docker run --rm -v "$PWD/prometheus:/etc/prometheus:ro" -w /etc/prometheus --entrypoint promtool prom/prometheus:v2.54.1 test rules alert.rules.test.yml
+      - name: Verify gateway configuration activation and idempotence
+        run: python scripts/test-gateway-activation.py
 
   frontend-build:
     runs-on: ubuntu-latest
@@ -87,6 +89,12 @@ jobs:
         run: |
           docker run --rm mantra-backend:${{ github.sha }} python -c "from pathlib import Path; assert Path('/app/alembic.ini').is_file(); assert Path('/app/migrations/env.py').is_file()"
           docker run --rm mantra-backend:${{ github.sha }} alembic heads
+      - name: Verify exact runtime image and disposable database cleanup
+        run: |
+          docker volume ls -q | sort > /tmp/mantra-volumes-before
+          bash scripts/test-runtime-image.sh mantra-backend:${{ github.sha }}
+          docker volume ls -q | sort > /tmp/mantra-volumes-after
+          diff /tmp/mantra-volumes-before /tmp/mantra-volumes-after
       - name: Scan image
         run: |
           scanner=aquasec/trivy@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c

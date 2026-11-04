@@ -8,6 +8,8 @@ The application owner should follow [APPLICATION_ENGINEER_CHECKLIST.md](APPLICAT
 
 See [PLATFORM_ENGINEER_CLOSEOUT.md](PLATFORM_ENGINEER_CLOSEOUT.md) for the implemented review/release controls and the remaining application/joint acceptance gates.
 
+The current deployed source, migration, functional checks, backup recovery and remaining security/scope limits are recorded in [RELEASE_ACCEPTANCE.md](RELEASE_ACCEPTANCE.md).
+
 ## Architecture
 
 ```mermaid

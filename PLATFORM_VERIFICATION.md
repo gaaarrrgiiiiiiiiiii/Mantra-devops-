@@ -2,6 +2,8 @@
 
 Verification date: **4 November 2026, Asia/Kolkata**.
 
+Current deployed acceptance is recorded in [RELEASE_ACCEPTANCE.md](RELEASE_ACCEPTANCE.md): main `c4c3dcf`, Jenkins #6 SUCCESS, live migration `0002_native_retrieval`, passing HTTPS application checks and verified post-migration backup restoration. Earlier release/build observations below are historical; their scan counts do not describe the latest image. Current archived scan: 0 fixable HIGH/CRITICAL, 1 vendor-unpatched CRITICAL and 82 vendor-unpatched HIGH findings.
+
 Acceptance covers the two-engineer DevOps plan and the single-EC2 hardening tasks P1–P6. The deployed host is `i-0d04109a558f3d149`, Elastic IP `32.193.54.28`. EKS, RDS and autoscaling remain future architecture phases.
 
 ## Platform checklist
@@ -58,10 +60,9 @@ The runtime's unused pip installation was removed because its vendored inventory
 Use the complete [application checklist](APPLICATION_ENGINEER_CHECKLIST.md) and [access/remote acceptance guide](TEAM_ACCESS_AND_REMOTE_ACCEPTANCE.md).
 
 - [x] Frontend container, gateway integration, truthful readiness and server-side API-key delivery are supplied by the platform.
-- [x] Application owner submitted [PR #3](https://github.com/gaaarrrgiiiiiiiiiii/Mantra-devops-/pull/3), with broader API/PostgreSQL tests and successful CI. It remains open and is not deployed.
-- [ ] Integrate PR #3 with the hardened platform, review it, rerun checks, merge and verify deployed behavior.
-- [ ] Correct deployed schema: `document_chunks.embedding` and `ts_content` are absent despite native retrieval code expecting them. Supply versioned migrations, existing-data backfills and tests. Ansible detects `/app/alembic.ini` and runs `alembic upgrade head` when packaged; disable automatic schema creation when adopting migrations.
-- [ ] Accept the broader application tests and features on the merged/deployed release, reconcile dependencies, and explicitly scope any asynchronous worker delivery.
+- [x] PR #3 contributions were integrated by reviewed PR #4; both are now recorded as merged.
+- [x] Versioned migrations, backfills, dependency locks and broader application tests were implemented; deployed native columns/indexes and migration revision are verified, with automatic schema creation disabled.
+- [x] The exact image passed 68 tests and representative HTTPS acceptance. Asynchronous workers/real model quality and other advanced scope limits remain explicit in the release record.
 - [ ] Teammate confirms own-device SSM sign-in; platform owner confirms transcript delivery. No shared administrator private key is required.
 - [x] Implement platform CODEOWNERS, required review/check protection tooling, PostgreSQL/frontend CI and migration/release gates. Verify actual GitHub settings with `scripts/github-platform.py audit`; see [platform implementation record](PLATFORM_ENGINEER_CLOSEOUT.md).
 

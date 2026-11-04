@@ -79,6 +79,7 @@
       loop:
         - ../../docker-compose.yml
         - ../../Caddyfile
+      register: deployment_configuration
 
     - name: Copy monitoring configuration
       ansible.builtin.copy:
@@ -243,6 +244,9 @@
         chdir: "{{ app_dir }}"
       environment:
         MANTRA_BACKEND_IMAGE: "{{ backend_image }}"
+
+    - name: Activate the deployed gateway configuration
+      ansible.builtin.import_tasks: ../tasks/activate-gateway.yml
 
     - name: Install Grafana credential synchronization script
       ansible.builtin.copy:
