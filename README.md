@@ -1,14 +1,10 @@
 # Mantra Industrial Knowledge Intelligence Platform
 
-Mantra combines a FastAPI knowledge API and React frontend with a single-host AWS DevOps platform. The platform owner maintains infrastructure, deployment, CI and monitoring; the application owner maintains retrieval, ingestion, application tests and schema migrations.
+Mantra combines a FastAPI knowledge API and React frontend with a single-host AWS DevOps platform. This repository contains the application, versioned database migrations, infrastructure, deployment automation, tests and monitoring configuration.
 
-See [PLATFORM_VERIFICATION.md](PLATFORM_VERIFICATION.md) for dated verification results and outstanding dependencies. The original [DevOps plan](MANTRA_DEVOPS_PLAN.md) describes the work allocation; its example credentials and historical topology are not production configuration.
+Terraform provisions AWS resources from [terraform/](terraform/). Ansible configures the host and deploys releases through [ansible/playbooks/deploy.yml](ansible/playbooks/deploy.yml), invoked by the [Jenkins pipeline](Jenkinsfile). Backend development and database upgrade instructions are in [backend/README.md](backend/README.md); frontend commands are in [frontend/README.md](frontend/README.md).
 
-The application owner should follow [APPLICATION_ENGINEER_CHECKLIST.md](APPLICATION_ENGINEER_CHECKLIST.md). [TEAM_ACCESS_AND_REMOTE_ACCEPTANCE.md](TEAM_ACCESS_AND_REMOTE_ACCEPTANCE.md) explains separate computer access, the restricted EC2 session and how to verify a PR through deployment and functional acceptance.
-
-See [PLATFORM_ENGINEER_CLOSEOUT.md](PLATFORM_ENGINEER_CLOSEOUT.md) for the implemented review/release controls and the remaining application/joint acceptance gates.
-
-The current deployed source, migration, functional checks, backup recovery and remaining security/scope limits are recorded in [RELEASE_ACCEPTANCE.md](RELEASE_ACCEPTANCE.md).
+Keep team handoff notes, workstation credentials and dated verification reports outside version control. The ignored `.local/` directory can hold operator records.
 
 ## Architecture
 
@@ -69,10 +65,10 @@ For an existing deployment, rotated web and Grafana credentials are stored only 
 Create private tunnels from your workstation:
 
 ```bash
-ssh -i ~/.ssh/mantra-key.pem -L 8080:127.0.0.1:8080 -L 3000:127.0.0.1:3000 -L 9090:127.0.0.1:9090 ubuntu@32.193.54.28
+ssh -N -i ~/.ssh/mantra-key.pem -L 127.0.0.1:48080:127.0.0.1:8080 -L 127.0.0.1:3000:127.0.0.1:3000 -L 127.0.0.1:9090:127.0.0.1:9090 -L 127.0.0.1:9093:127.0.0.1:9093 -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 ubuntu@32.193.54.28
 ```
 
-Jenkins is then available at `http://localhost:8080`, Grafana at `http://localhost:3000/grafana/`, and Prometheus at `http://localhost:9090`.
+Keep the tunnel running. Jenkins is then available at `http://127.0.0.1:48080`, Grafana at `http://127.0.0.1:3000/grafana/`, Prometheus at `http://127.0.0.1:9090`, and Alertmanager at `http://127.0.0.1:9093`. If your public IP changes, the operator must update the restricted SSH CIDR before reconnecting.
 
 ## Infrastructure and deployment
 
@@ -90,7 +86,7 @@ The Terraform S3 backend and DynamoDB lock table must already exist. Backend sta
 
 Jenkins polls the configured repository's `main` branch every five minutes. Its pipeline builds a Python 3.11 runtime image, runs pytest in that image, runs Bandit and Trivy, pushes a commit tag, and deploys through a dedicated SSH credential. Trivy retains every high/critical finding and blocks findings with available fixes; vendor-unpatched findings remain in the archived report. The controller uses its EC2 role for scoped ECR push access. GitHub Actions runs independent pull request validation. Do not run both systems as competing deployment controllers.
 
-Schema migrations remain an application handoff: this repository currently has no Alembic migration directory. Ansible detects `/app/alembic.ini` in the runtime image and runs `alembic upgrade head` before starting the API when the application owner supplies that package. Turn `IKI_AUTO_CREATE_SCHEMA` off when adopting migrations; until then the current schema bootstrap remains enabled.
+Versioned Alembic revisions are packaged from `backend/migrations/`. Ansible creates a database backup and runs `alembic upgrade head` before starting the API when migrations are present. Set `mantra_require_migrations=true` to enforce packaged migrations during promotion. Production uses `IKI_AUTO_CREATE_SCHEMA=false`; see [backend/README.md](backend/README.md) for upgrade and backfill checks.
 
 ## Verification and recovery
 
