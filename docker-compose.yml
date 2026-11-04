@@ -37,7 +37,9 @@ services:
       IKI_REQUIRE_API_KEY: "true"
       IKI_API_KEY: ${IKI_API_KEY:?Set IKI_API_KEY in .env}
       IKI_REPOSITORY_BACKEND: postgres
-      IKI_AUTO_CREATE_SCHEMA: ${IKI_AUTO_CREATE_SCHEMA:-true}
+      IKI_AUTO_CREATE_SCHEMA: "false"
+      IKI_RATE_LIMIT_PER_MINUTE: ${IKI_RATE_LIMIT_PER_MINUTE:-120}
+      IKI_TRUST_PROXY_HEADERS: "true"
       IKI_DATABASE_URL: postgresql+asyncpg://mantra_user:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/mantra_db
       IKI_REDIS_URL: redis://redis:6379/0
       IKI_STORAGE_BACKEND: ${IKI_STORAGE_BACKEND:-s3}

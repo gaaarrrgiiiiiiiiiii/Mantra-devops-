@@ -38,11 +38,18 @@ compose() { docker compose -p mantra-platform-verify --env-file .env "$@"; }
 cleanup() { compose down --volumes --remove-orphans; }
 trap cleanup EXIT
 compose config --quiet
-compose build backend frontend
+if [ "${MANTRA_VALIDATION_REUSE_IMAGES:-0}" = 1 ]; then
+    # Only for rerunning checks against images already built from this checkout.
+    docker image inspect mantra-backend:platform-validation mantra-platform-verify-frontend >/dev/null
+else
+    compose build backend frontend
+fi
 compose run --rm --no-deps -e IKI_ENVIRONMENT=test -e IKI_REQUIRE_API_KEY=false -e IKI_REPOSITORY_BACKEND=memory -e IKI_REDIS_URL= -e IKI_STORAGE_BACKEND=local -e IKI_LOCAL_STORAGE_PATH=/tmp/test-storage -v "$PWD/tests:/tests:ro" backend python -m pytest /tests -q -p no:cacheprovider
 compose run --rm --no-deps --entrypoint promtool prometheus check config /etc/prometheus/prometheus.yml
 compose run --rm --no-deps --entrypoint amtool alertmanager check-config /etc/alertmanager/alertmanager.yml
 compose run --rm --no-deps --entrypoint caddy gateway validate --config /etc/caddy/Caddyfile
+compose up -d --wait db redis
+compose run --rm --no-deps backend alembic upgrade head
 compose up -d --no-build
 for attempt in {1..30}; do
     if curl --fail --silent http://127.0.0.1:18080/ready >/dev/null; then break; fi
@@ -66,9 +73,34 @@ try:
     raise AssertionError('Unauthenticated API request succeeded')
 except HTTPError as exc:
     assert exc.code == 401, exc.code
+for route in ['/docs', '/openapi.json', '/redoc']:
+    try:
+        urlopen(base + route)
+        raise AssertionError(f'Unauthenticated documentation request succeeded: {route}')
+    except HTTPError as exc:
+        assert exc.code == 401, (route, exc.code)
+    response = urlopen(Request(base + route, headers={'Authorization': authorization}))
+    if route == '/openapi.json':
+        assert '/api/copilot/ask' in json.load(response)['paths']
+    else:
+        assert b'Industrial Knowledge Intelligence API' in response.read(), route
+print('Swagger, OpenAPI and ReDoc are authenticated and routed to FastAPI')
 request = Request(base + '/api/documents', headers={'Authorization': authorization})
 assert isinstance(json.load(urlopen(request)), list)
 print('Gateway, SPA routing, authenticated API and unauthorized rejection passed')
+# The gateway must replace client-supplied forwarding headers, so rotating
+# spoofed X-Forwarded-For addresses cannot evade the configured per-client limit.
+limited = False
+for index in range(125):
+    try:
+        urlopen(Request(base + '/api/documents', headers={'Authorization': authorization, 'X-Forwarded-For': f'192.0.2.{index + 1}'}))
+    except HTTPError as exc:
+        assert exc.code == 429, exc.code
+        assert exc.headers['Retry-After'] == '60'
+        limited = True
+        break
+assert limited, 'Proxy-backed application rate limit was bypassed'
+print('Rate limit enforced through the real gateway despite spoofed forwarding headers')
 PY
 compose exec -T db psql -v ON_ERROR_STOP=1 -U mantra_user -d mantra_db -Atc "SELECT extversion FROM pg_extension WHERE extname='vector';"
 compose exec -T redis redis-cli ping

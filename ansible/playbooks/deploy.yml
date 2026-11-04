@@ -139,14 +139,6 @@
       changed_when: false
       failed_when: example_secrets.rc != 1
 
-    - name: Persist the deployed backend image for restarts and maintenance
-      ansible.builtin.lineinfile:
-        path: "{{ app_dir }}/.env"
-        regexp: '^MANTRA_BACKEND_IMAGE='
-        line: "MANTRA_BACKEND_IMAGE={{ backend_image }}"
-        mode: '0600'
-      no_log: true
-
     - name: Authenticate Docker to ECR with the EC2 instance profile
       ansible.builtin.shell: |
         set -o pipefail
@@ -205,7 +197,7 @@
         that:
           - migration_package.stdout | trim == 'True'
         fail_msg: "Application release requires a packaged alembic.ini and migrations; do not bypass this gate to promote the pending application PR."
-      when: mantra_require_migrations | default(false) | bool
+      when: mantra_require_migrations | default(true) | bool
 
     - name: Install backup tooling before any application migration
       ansible.builtin.copy:
@@ -227,20 +219,30 @@
         MANTRA_BACKEND_IMAGE: "{{ backend_image }}"
       when: migration_package.stdout | trim == 'True'
 
+    - name: Keep protected previous configuration for application rollback
+      ansible.builtin.copy:
+        src: "{{ app_dir }}/.env"
+        dest: /root/mantra-previous-release.env
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+
+    - name: Persist the backend image only after successful migrations
+      ansible.builtin.lineinfile:
+        path: "{{ app_dir }}/.env"
+        regexp: '^MANTRA_BACKEND_IMAGE='
+        line: "MANTRA_BACKEND_IMAGE={{ backend_image }}"
+        mode: '0600'
+      no_log: true
+
     - name: Start the stack without rebuilding the backend
       ansible.builtin.command: docker compose --env-file .env up -d --no-build --remove-orphans
       args:
         chdir: "{{ app_dir }}"
       environment:
         MANTRA_BACKEND_IMAGE: "{{ backend_image }}"
-
-    - name: Install database backup script
-      ansible.builtin.copy:
-        src: ../../scripts/backup-db-to-s3.sh
-        dest: /usr/local/sbin/mantra-backup-db
-        owner: root
-        group: root
-        mode: '0750'
 
     - name: Install Grafana credential synchronization script
       ansible.builtin.copy:

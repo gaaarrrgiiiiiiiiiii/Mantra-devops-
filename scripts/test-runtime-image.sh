@@ -29,4 +29,4 @@ docker run --rm --network "$test_id" -v "$PWD/tests:/tests:ro" \
     -e IKI_ENVIRONMENT=test -e IKI_REQUIRE_API_KEY=false \
     -e IKI_REPOSITORY_BACKEND=memory -e IKI_LOCAL_STORAGE_PATH=/tmp/test-storage \
     -e MANTRA_TEST_POSTGRES_URL=postgresql+asyncpg://mantra_test:ci-only-password@test-db:5432/mantra_test \
-    "$image" python -m pytest /tests -v -p no:cacheprovider
+    "$image" python -m pytest /tests -v -p no:cacheprovider -o asyncio_default_fixture_loop_scope=function

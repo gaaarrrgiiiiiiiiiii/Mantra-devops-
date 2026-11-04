@@ -122,7 +122,7 @@ class CopilotService:
             return
 
         citations = build_citations(scored_chunks)
-        model_name = select_model(state["query_type"], self.settings, confidence)
+        model_name = 'deterministic' if isinstance(self.llm_provider, DeterministicLLMProvider) else select_model(state["query_type"], self.settings, confidence)
 
         pieces: List[str] = []
         try:
@@ -139,7 +139,7 @@ class CopilotService:
                 # report generation_status="llm" with a blank answer. Route
                 # it into the same fallback as a real provider failure.
                 raise RuntimeError("stream completed with no content")
-            generation_status = "llm"
+            generation_status = "deterministic" if isinstance(self.llm_provider, DeterministicLLMProvider) else "llm"
         except Exception:
             fallback = build_grounded_answer(question, citations, state["query_type"])
             pieces = [fallback]
@@ -151,7 +151,7 @@ class CopilotService:
             confidence=confidence,
             citations=citations,
             retrieved_chunk_count=len(citations),
-            model_used=model_name,
+            model_used=model_name if generation_status == 'llm' else None,
             cache_status=state["cache_status"],
             query_type=state["query_type"],
             generation_status=generation_status,
@@ -163,7 +163,7 @@ class CopilotService:
             "type": "done",
             "citations": [c.model_dump() for c in citations],
             "confidence": confidence,
-            "model_used": model_name,
+            "model_used": response.model_used,
             "generation_status": generation_status,
             "cache_status": state["cache_status"],
         }
@@ -196,7 +196,7 @@ class CopilotService:
         query_embedding = self.embedding_provider.embed(question)
         query_type = classify_query(question)
         corpus_version = await self.repository.get_corpus_version()
-        model_name = select_model(query_type, self.settings, confidence="unknown")
+        model_name = 'deterministic' if isinstance(self.llm_provider, DeterministicLLMProvider) else select_model(query_type, self.settings, confidence="unknown")
         cache_key = exact_cache_key(normalized_query, model_name, self.settings.prompt_version, corpus_version)
         return {
             **state,
@@ -319,10 +319,10 @@ class CopilotService:
             return {**state, "response": response}
 
         citations = build_citations(scored_chunks)
-        model_name = select_model(state["query_type"], self.settings, confidence)
+        model_name = 'deterministic' if isinstance(self.llm_provider, DeterministicLLMProvider) else select_model(state["query_type"], self.settings, confidence)
         try:
             answer = await self.llm_provider.generate_answer(state["question"], citations, model_name, state["query_type"])
-            generation_status = "llm"
+            generation_status = "deterministic" if isinstance(self.llm_provider, DeterministicLLMProvider) else "llm"
             if not await self.safety_provider.is_allowed(answer):
                 answer = build_grounded_answer(state["question"], citations, state["query_type"])
                 generation_status = "safety_fallback"
@@ -335,7 +335,7 @@ class CopilotService:
             confidence=confidence,
             citations=citations,
             retrieved_chunk_count=len(citations),
-            model_used=model_name,
+            model_used=model_name if generation_status == 'llm' else None,
             cache_status=state["cache_status"],
             query_type=state["query_type"],
             generation_status=generation_status,
@@ -351,10 +351,10 @@ class CopilotService:
 
     async def _write_cache(self, state: CopilotState) -> CopilotState:
         response = state["response"]
-        # Only cache real LLM answers. Degraded fallbacks (NVIDIA 5xx, safety
+        # Cache successful provider answers, including explicit offline mode. Degraded fallbacks (NVIDIA 5xx, safety
         # block) still carry citations but must not stick in the cache and be
         # re-served as if they were the model's answer.
-        if not response.citations or response.generation_status != "llm":
+        if not response.citations or response.generation_status not in {'llm', 'deterministic'}:
             return state
         await self.exact_cache.set(state["cache_key"], response)
         entry = SemanticCacheEntry(
@@ -478,7 +478,7 @@ def response_from_cache_entry(entry: SemanticCacheEntry, cache_status: str) -> C
         confidence=entry.confidence,
         citations=entry.citations,
         retrieved_chunk_count=entry.retrieved_chunk_count,
-        model_used=entry.model_name,
+        model_used=None if entry.model_name == 'deterministic' else entry.model_name,
         cache_status=cache_status,
         query_type=entry.query_type,
         generation_status=entry.cache_metadata.get("generation_status", "cached"),

@@ -43,9 +43,24 @@ Set `MANTRA_TLS_SERVER_NAME` to the public IP or hostname used in `MANTRA_SITE_A
 
 Copy `.env.example` to `.env`, replace every placeholder, and protect it with `chmod 600`. Use URL-safe database passwords because the connection URL embeds the password. Generate the gateway's bcrypt hash using `caddy hash-password`; preserve its dollar signs by single-quoting the `.env` value. Keep runtime credentials outside Git. Existing deployments use `/opt/mantra/.env`.
 
+For a fresh local Compose database, build the images, start storage, and migrate before starting the API:
+
+```bash
+docker compose build backend frontend
+docker compose up -d --wait db redis
+docker compose run --rm --no-deps backend alembic upgrade head
+docker compose up -d --no-build
+```
+
+PostgreSQL schema changes are owned by the packaged Alembic revisions; production disables automatic table creation. Backend dependencies are pinned in `backend/requirements.lock` for Python 3.11/Linux; install that lock for CI or use the container. `backend/requirements.txt` records the declared dependency families and should be reconciled when refreshing the lock. Runtime OCR includes Tesseract and DejaVu fonts. Existing native vectors/search text are backfilled during migration; see the [database upgrade procedure](backend/README.md).
+
 `MANTRA_SITE_ADDRESS=:80` provides HTTP for local setup. Production can use the permanent public IP with Let's Encrypt's `shortlived` certificate profile, or a DNS hostname whose A record points at the Elastic IP. Caddy renews certificates automatically. Verify the issued certificate before claiming HTTPS is operational. [IP certificates](https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability), [Caddy HTTPS documentation](https://caddyserver.com/docs/automatic-https).
 
 The frontend and `/api/*` use gateway Basic authentication. The gateway adds the backend API key only after authentication. `/health` and `/ready` are public probes. Monitoring credentials are separate. A future application token flow can replace gateway authentication.
+
+The gateway overwrites forwarded client identity before proxying API requests. The API enforces a configurable per-client, per-process limit (default 120 requests/minute), and monitoring probes bypass this limit. This single-host limiter must be replaced by shared state before adding API replicas. Shared gateway authentication does not provide per-user application roles.
+
+The API reads at most the configured upload limit plus one byte before rejecting an oversized file. Caddy caps incoming request bodies at 32 MB; the default application file limit is 25 MiB. Coordinate both limits before allowing larger uploads.
 
 For an existing deployment, rotated web and Grafana credentials are stored only in `/root/mantra-access.json`; retrieve them privately over SSH with `sudo`. The Jenkins username is `mantra-admin`; its generated password is in `/var/lib/jenkins/secrets/mantra-admin-password`. Neither file should be copied into chat, Git or screenshots.
 

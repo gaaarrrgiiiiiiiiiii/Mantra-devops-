@@ -145,13 +145,13 @@ class RCAService:
                 model_name,
                 "rca_investigation",
             )
-            generation_status = "llm"
+            generation_status = "deterministic" if isinstance(self.llm_provider, DeterministicLLMProvider) else "llm"
         except Exception:
             narrative = _hedged_fallback_narrative(seed_value, chains)
             generation_status = "fallback"
 
         report = RCAReport(
-            seed=seed_value, chains=chains, narrative=narrative, generation_status=generation_status, model_used=model_name
+            seed=seed_value, chains=chains, narrative=narrative, generation_status=generation_status, model_used=model_name if generation_status == 'llm' else None
         )
         self._rca_cache[cache_key] = report
         return report
