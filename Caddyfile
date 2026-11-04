@@ -26,6 +26,12 @@
         }
     }
 
+    @api_docs path /docs /openapi.json /redoc
+    handle @api_docs {
+        import application_auth
+        reverse_proxy backend:8000
+    }
+
     handle /health {
         reverse_proxy backend:8000
     }

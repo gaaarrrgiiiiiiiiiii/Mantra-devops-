@@ -73,6 +73,18 @@ try:
     raise AssertionError('Unauthenticated API request succeeded')
 except HTTPError as exc:
     assert exc.code == 401, exc.code
+for route in ['/docs', '/openapi.json', '/redoc']:
+    try:
+        urlopen(base + route)
+        raise AssertionError(f'Unauthenticated documentation request succeeded: {route}')
+    except HTTPError as exc:
+        assert exc.code == 401, (route, exc.code)
+    response = urlopen(Request(base + route, headers={'Authorization': authorization}))
+    if route == '/openapi.json':
+        assert '/api/copilot/ask' in json.load(response)['paths']
+    else:
+        assert b'Industrial Knowledge Intelligence API' in response.read(), route
+print('Swagger, OpenAPI and ReDoc are authenticated and routed to FastAPI')
 request = Request(base + '/api/documents', headers={'Authorization': authorization})
 assert isinstance(json.load(urlopen(request)), list)
 print('Gateway, SPA routing, authenticated API and unauthorized rejection passed')
