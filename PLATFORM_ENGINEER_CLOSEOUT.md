@@ -2,6 +2,8 @@
 
 Date: 4 November 2026, Asia/Kolkata. This record separates implemented platform controls from application-owner and joint acceptance dependencies.
 
+Update: the platform owner has implemented the missing migration package and broader acceptance tests on PR #4. See [IMPLEMENTATION_RESULTS.md](IMPLEMENTATION_RESULTS.md) for current candidate results. Historical missing-schema observations below describe the existing production baseline; review, merge and deployed acceptance are still pending.
+
 ## Implemented platform controls
 
 - Restricted application SSM access is provisioned; managed node is Online, approved document Active, dedicated user `mantra-app` has no sudo/Docker access, and host role credentials/production secrets are blocked. The retired application key is absent from `ubuntu`.

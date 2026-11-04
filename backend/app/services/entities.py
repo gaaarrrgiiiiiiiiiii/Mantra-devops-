@@ -276,7 +276,9 @@ def normalize_entity(entity_type: str, raw: str) -> str:
     value = " ".join(raw.upper().replace("_", " ").split())
     if entity_type == "EQUIPMENT_TAG":
         return "".join(char for char in value if char.isalnum())
-    if entity_type in {"PROCEDURE_ID", "PART_NUMBER", "REGULATORY_REF"}:
+    if entity_type == 'REGULATORY_REF':
+        return value.replace(' ', '').replace('-', '')
+    if entity_type in {"PROCEDURE_ID", "PART_NUMBER"}:
         return value.replace(" ", "")
     return value
 

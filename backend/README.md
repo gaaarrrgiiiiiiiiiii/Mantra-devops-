@@ -9,7 +9,7 @@ Production-oriented FastAPI backend for the first two Industrial Knowledge Intel
 
 - `IKI_REPOSITORY_BACKEND=memory`: tests and throwaway local runs.
 - `IKI_REPOSITORY_BACKEND=sqlite`: durable local development using SQLAlchemy and SQLite.
-- `IKI_REPOSITORY_BACKEND=postgres`: production deployment path using PostgreSQL, pgvector, and tsvector. Enable `IKI_AUTO_CREATE_SCHEMA` for initial setup (see below).
+- `IKI_REPOSITORY_BACKEND=postgres`: PostgreSQL, pgvector and full-text retrieval, with Alembic migrations before startup. Automatic schema creation defaults to false for this backend.
 - `IKI_STORAGE_BACKEND=local`: stores raw uploaded documents under `IKI_LOCAL_STORAGE_PATH`.
 - `IKI_STORAGE_BACKEND=s3`: stores raw uploaded documents in private S3-compatible object storage.
 - `IKI_REQUIRE_API_KEY=true`: protects document, graph, and copilot endpoints with `IKI_API_KEY_HEADER`.
@@ -48,13 +48,20 @@ IKI_LONG_CONTEXT_MODEL=z-ai/glm-5.2
 
 ## Production Database
 
-This repository does not include Alembic migrations. With `IKI_AUTO_CREATE_SCHEMA=true`
-(the default), startup creates the ORM tables, enables the `vector` extension,
-and adds the vector and generated full-text columns required by hybrid retrieval.
-The database role needs permission to install the extension. Initialization is
-idempotent and preserves existing tables and columns. It does not create HNSW
-or GIN indexes; index tuning and versioned schema migrations remain separate work.
-Do not disable schema creation on a fresh database.
+Run `alembic -c backend/alembic.ini upgrade head` from the repository, or
+`alembic upgrade head` inside the backend image, before PostgreSQL startup.
+The URL comes from `IKI_DATABASE_URL`; no credential is written to alembic.ini.
+Revision `0001_legacy_baseline` creates a frozen schema or adopts compatible
+existing tables. Revision `0002_native_retrieval` enables pgvector, adds
+768-dimensional vectors and generated search text, backfills saved JSON vectors,
+and creates GIN/full-text and HNSW/cosine indexes. Existing documents and JSON
+vectors are retained. Malformed or incompatible vectors abort the transaction
+instead of silently dropping or truncating data. The application rejects an
+unmigrated PostgreSQL database or an incompatible embedding dimension.
+
+The migration role needs schema/DDL and extension permissions. Run migrations
+as a controlled deployment step; the API does not run startup DDL. SQLite local
+development still defaults to automatic ORM table creation.
 
 For production, set:
 
@@ -63,7 +70,7 @@ IKI_REPOSITORY_BACKEND=postgres
 IKI_DATABASE_URL=postgresql+asyncpg://user:password@host:5432/industrial_intel
 IKI_STORAGE_BACKEND=s3
 IKI_S3_BUCKET=private-industrial-documents
-IKI_AUTO_CREATE_SCHEMA=true
+IKI_AUTO_CREATE_SCHEMA=false
 IKI_REQUIRE_API_KEY=true
 IKI_API_KEY=replace-with-secret
 IKI_LLM_PROVIDER=nvidia
@@ -76,6 +83,22 @@ Then run migrations before launching the app:
 ```bash
 python3 -m alembic upgrade head
 ```
+
+The single-host deployment takes a verified S3 database backup before migration.
+Migrations are additive and forward-only: roll back to the previous compatible
+application image rather than deleting columns/tables. Protected previous runtime
+configuration is saved at `/root/mantra-previous-release.env` only after migration
+succeeds; restore a verified backup into a separate database if data recovery is
+needed. Review/repair incompatible legacy data before retrying a failed upgrade.
+Changing embedding dimensions/models requires an explicit new migration and data
+reindexing. Lock waits are bounded to 15 seconds and each migration statement to
+five minutes; larger datasets need a separately planned backfill/index rollout.
+
+Run the real PostgreSQL tests with `MANTRA_TEST_POSTGRES_URL` pointing to a
+disposable server with CREATE DATABASE rights. Tests create random databases and
+verify empty/populated upgrades, backfills, repeated upgrade, transaction rollback,
+native retrieval, semantic cache and restart persistence. Never point test setup
+at production credentials.
 
 ## Current Honesty Note
 

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from ..config import Settings
+from .entities import normalize_entity
 from ..models import (
     Citation,
     ComplianceGap,
@@ -147,7 +148,7 @@ class ComplianceService:
                 f"Summarize the compliance posture for {regulation} ({spec['title']}) based on the evidence.",
                 citations, model_name, "compliance_audit",
             )
-            generation_status = "llm"
+            generation_status = "deterministic" if isinstance(self.llm_provider, DeterministicLLMProvider) else "llm"
         except Exception:
             top = max(requirement_results, key=lambda r: len(r.citations), default=None)
             summary = (
@@ -180,7 +181,7 @@ class ComplianceService:
 
 
 def _normalize_regulation_key(regulation: str) -> str:
-    return regulation.upper().replace(" ", "")
+    return normalize_entity('REGULATORY_REF', regulation)
 
 
 def _load_framework(path: Path) -> Dict[str, dict]:

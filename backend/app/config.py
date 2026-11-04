@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import List
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 0  # 0 disables; per client host, per API instance
     trust_proxy_headers: bool = False  # only enable behind a trusted reverse proxy (e.g. Caddy) that overwrites X-Forwarded-For
     max_upload_bytes: int = 25 * 1024 * 1024
-    auto_create_schema: bool = True
+    auto_create_schema: bool | None = None
     chunk_size: int = 500
     chunk_overlap: int = 100
     embedding_backend: str = Field(default="hashing", pattern="^(hashing|sentence-transformers)$")
@@ -65,6 +65,14 @@ class Settings(BaseSettings):
     rca_max_hops: int = 3
     rca_top_chains: int = 3
     rca_temporal_window_days: int = 90
+
+    @model_validator(mode='after')
+    def database_contract(self):
+        if self.auto_create_schema is None:
+            self.auto_create_schema = self.repository_backend != 'postgres'
+        if self.repository_backend == 'postgres' and self.embedding_dimension != 768:
+            raise ValueError('PostgreSQL migrations use 768-dimensional vectors; changing the dimension requires a new migration and reindexing.')
+        return self
 
     @property
     def cors_origin_list(self) -> List[str]:

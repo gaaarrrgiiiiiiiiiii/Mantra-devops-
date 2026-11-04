@@ -80,7 +80,7 @@ class FailureIntelligenceService:
                 f"Summarize the contributing factors and likely root cause in {document.metadata.filename}.",
                 citations, self.settings.summary_model, "incident_analysis",
             )
-            generation_status = "llm"
+            generation_status = "deterministic" if isinstance(self.llm_provider, DeterministicLLMProvider) else "llm"
         except Exception:
             summary = (
                 f"Contributing factors identified: {', '.join(contributing_factors)}. "

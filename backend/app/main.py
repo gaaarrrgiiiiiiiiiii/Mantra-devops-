@@ -14,7 +14,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from sqlalchemy import text
 
 from .config import Settings, get_settings
-from .database import create_engine_and_session_factory, initialize_database
+from .database import create_engine_and_session_factory, initialize_database, verify_postgres_schema
 from .errors import UploadTooLargeError
 from .models import (
     AdminOverview,
@@ -62,9 +62,6 @@ MONITORING_PATHS = {"/health", "/api/health", "/ready", "/api/ready", "/metrics"
 def create_app(settings: Optional[Settings] = None, repository: Optional[Repository] = None) -> FastAPI:
     settings = settings or get_settings()
 
-    if settings.environment == "production" and not (settings.require_api_key and settings.api_key):
-        raise RuntimeError("Production requires IKI_REQUIRE_API_KEY=true and IKI_API_KEY set")
-
     # Fail closed: production must not boot with the data API unauthenticated.
     if settings.environment == "production" and not (settings.require_api_key and settings.api_key):
         raise RuntimeError("Production requires IKI_REQUIRE_API_KEY=true and IKI_API_KEY set")
@@ -91,6 +88,12 @@ def create_app(settings: Optional[Settings] = None, repository: Optional[Reposit
                 engine, session_factory = create_engine_and_session_factory(settings.database_url)
                 if settings.auto_create_schema:
                     await initialize_database(engine)
+                if engine.dialect.name == 'postgresql':
+                    try:
+                        await verify_postgres_schema(engine)
+                    except Exception:
+                        await engine.dispose()
+                        raise
                 app_repository = SqlAlchemyRepository(session_factory)
 
         app.state.repository = app_repository
@@ -258,7 +261,7 @@ def create_app(settings: Optional[Settings] = None, repository: Optional[Reposit
     async def upload_document(file: UploadFile = File(...)) -> DocumentResponse:
         """Upload a multipart file, extract text and entities, and index searchable chunks. Identical content returns the existing document with duplicate status."""
         try:
-            payload = await file.read()
+            payload = await file.read(settings.max_upload_bytes + 1)
             return await app.state.ingestion.ingest(
                 filename=file.filename or "uploaded-document",
                 content_type=file.content_type or "application/octet-stream",

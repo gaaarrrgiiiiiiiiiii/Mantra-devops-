@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from .db_models import Base
 
+SCHEMA_REVISION = '0002_native_retrieval'
+
 
 def create_engine_and_session_factory(database_url: str) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     connect_args = {}
@@ -21,15 +23,18 @@ def create_engine_and_session_factory(database_url: str) -> tuple[AsyncEngine, a
 
 
 async def initialize_database(engine: AsyncEngine) -> None:
+    if engine.dialect.name == 'postgresql':
+        raise RuntimeError('Run alembic upgrade head before PostgreSQL startup; set IKI_AUTO_CREATE_SCHEMA=false.')
     async with engine.begin() as connection:
-        if engine.dialect.name == "postgresql":
-            await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public"))
         await connection.run_sync(Base.metadata.create_all)
-        if engine.dialect.name == "postgresql":
-            # create_all cannot create the PostgreSQL-only columns used by hybrid retrieval.
-            await connection.execute(text("ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS embedding vector"))
-            await connection.execute(text(
-                "ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS ts_content tsvector "
-                "GENERATED ALWAYS AS (to_tsvector('english', content)) STORED"
-            ))
-            await connection.execute(text("ALTER TABLE semantic_query_cache ADD COLUMN IF NOT EXISTS query_embedding vector"))
+
+
+async def verify_postgres_schema(engine: AsyncEngine) -> None:
+    """Fail startup if migration delivery was skipped or targets another release."""
+    async with engine.connect() as connection:
+        present = await connection.scalar(text("SELECT to_regclass('public.alembic_version') IS NOT NULL"))
+        if not present:
+            raise RuntimeError('PostgreSQL has no migration history. Run alembic upgrade head before startup.')
+        versions = (await connection.execute(text('SELECT version_num FROM alembic_version'))).scalars().all()
+        if versions != [SCHEMA_REVISION]:
+            raise RuntimeError('PostgreSQL migration revision does not match this application release.')

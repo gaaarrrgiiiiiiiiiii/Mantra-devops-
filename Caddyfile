@@ -14,11 +14,15 @@
 
 {$MANTRA_SITE_ADDRESS} {
     encode gzip zstd
+    request_body {
+        max_size 32MB
+    }
 
     handle /api/* {
         import application_auth
         reverse_proxy backend:8000 {
             header_up X-API-Key {$IKI_API_KEY}
+            header_up X-Forwarded-For {remote_host}
         }
     }
 

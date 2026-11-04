@@ -93,7 +93,7 @@ def test_copilot_empty_database(client):
     assert response.json()["retrieved_chunk_count"] == 0
 
 
-@pytest.mark.parametrize("payload", [{}, {"question": ""}, {"question": "pump", "limit": 0}, {"question": "pump", "limit": 11}])
+@pytest.mark.parametrize("payload", [{}, {"question": ""}, {"question": "   "}, {"question": "pump", "limit": 0}, {"question": "pump", "limit": 11}])
 def test_copilot_validates_request(client, payload):
     assert client.post("/api/copilot/ask", json=payload).status_code == 422
 

@@ -250,7 +250,7 @@ class InMemoryRepository:
             document
             for document in self.documents.values()
             if any(
-                entity.entity_type == entity_type and entity.normalized_text == normalized
+                entity.entity_type == entity_type and normalize_graph_value(entity_type, entity.normalized_text) == normalized
                 for entity in document.entities
             )
         ]
@@ -457,6 +457,8 @@ class SqlAlchemyRepository:
                           AND prompt_version = :prompt_version
                           AND corpus_version = :corpus_version
                           AND query_embedding IS NOT NULL
+                          AND vector_norm(query_embedding) > 0
+                          AND vector_norm(CAST(:embedding AS vector)) > 0
                           AND 1.0 - (query_embedding <=> CAST(:embedding AS vector)) >= :threshold
                         ORDER BY query_embedding <=> CAST(:embedding AS vector)
                         LIMIT 1
@@ -479,6 +481,9 @@ class SqlAlchemyRepository:
                     await increment_cache_hit(session, record.id)
                     await session.commit()
                     return semantic_cache_record_to_model(record)
+
+                # PostgreSQL vectors are migration-owned; a native miss is a miss.
+                return None
 
             result = await session.execute(
                 select(SemanticCacheRecord).where(
@@ -556,7 +561,7 @@ class SqlAlchemyRepository:
         async with self.session_factory() as session:
             bind = session.get_bind()
             if bind and bind.dialect.name == "postgresql":
-                native_results = await self._postgres_hybrid_search(
+                return await self._postgres_hybrid_search(
                     session,
                     query_text,
                     query_tokens,
@@ -564,8 +569,6 @@ class SqlAlchemyRepository:
                     query_entity_keys,
                     limit,
                 )
-                if native_results:
-                    return native_results
         return await application_level_search(self, query_text, query_tokens, query_embedding, query_entity_keys, limit)
 
     async def build_graph(self) -> KnowledgeGraph:
@@ -578,13 +581,16 @@ class SqlAlchemyRepository:
 
     async def documents_for_entity(self, entity_type: str, raw_value: str) -> List[DocumentResponse]:
         normalized = normalize_graph_value(entity_type, raw_value)
+        stored_value = ExtractedEntityRecord.normalized_text
+        if entity_type == 'REGULATORY_REF':
+            stored_value = func.replace(func.replace(stored_value, '-', ''), ' ', '')
         async with self.session_factory() as session:
             result = await session.execute(
                 select(DocumentRecord)
                 .join(ExtractedEntityRecord)
                 .where(
                     ExtractedEntityRecord.entity_type == entity_type,
-                    ExtractedEntityRecord.normalized_text == normalized,
+                    stored_value == normalized,
                 )
                 .distinct()
             )
@@ -649,7 +655,7 @@ class SqlAlchemyRepository:
                         ELSE 0.0
                     END AS lexical_score,
                     CASE
-                        WHEN c.embedding IS NULL THEN 0.0
+                        WHEN c.embedding IS NULL OR vector_norm(c.embedding) = 0 OR vector_norm(query.query_embedding) = 0 THEN 0.0
                         ELSE 1.0 - (c.embedding <=> query.query_embedding)
                     END AS vector_score
                 FROM document_chunks c
@@ -660,10 +666,12 @@ class SqlAlchemyRepository:
                     OR c.content ILIKE :query_like
                     OR (
                         c.embedding IS NOT NULL
+                        AND vector_norm(c.embedding) > 0
+                        AND vector_norm(query.query_embedding) > 0
                         AND 1.0 - (c.embedding <=> query.query_embedding) > 0.05
                     )
                 ORDER BY ((0.60 * COALESCE(ts_rank(c.ts_content, query.ts_query), 0.0)) +
-                          (0.30 * CASE WHEN c.embedding IS NULL THEN 0.0 ELSE 1.0 - (c.embedding <=> query.query_embedding) END)) DESC
+                          (0.30 * CASE WHEN c.embedding IS NULL OR vector_norm(c.embedding) = 0 OR vector_norm(query.query_embedding) = 0 THEN 0.0 ELSE 1.0 - (c.embedding <=> query.query_embedding) END)) DESC
                 LIMIT :limit
                 """
             ),
@@ -733,7 +741,7 @@ class SqlAlchemyRepository:
         )
         keys: Dict[str, Set[Tuple[str, str]]] = {}
         for chunk_id, entity_type, normalized_text in result.all():
-            keys.setdefault(chunk_id, set()).add((entity_type, normalized_text))
+            keys.setdefault(chunk_id, set()).add((entity_type, normalize_graph_value(entity_type, normalized_text)))
         return keys
 
 
@@ -898,7 +906,7 @@ def entity_record_to_model(record: ExtractedEntityRecord) -> ExtractedEntity:
         chunk_id=record.chunk_id,
         entity_type=record.entity_type,
         text=record.text,
-        normalized_text=record.normalized_text,
+        normalized_text=normalize_graph_value(record.entity_type, record.normalized_text),
         confidence=record.confidence,
     )
 
@@ -1042,6 +1050,8 @@ def normalize_graph_value(entity_type: str, raw_value: str) -> str:
             if canonical:
                 return normalize_entity("EQUIPMENT_TAG", canonical)
         return "".join(char for char in value if char.isalnum())
-    if entity_type in {"PROCEDURE_ID", "PART_NUMBER", "REGULATORY_REF"}:
+    if entity_type == 'REGULATORY_REF':
+        return normalize_entity(entity_type, raw_value)
+    if entity_type in {"PROCEDURE_ID", "PART_NUMBER"}:
         return value.replace(" ", "")
     return " ".join(value.replace("_", " ").split())
