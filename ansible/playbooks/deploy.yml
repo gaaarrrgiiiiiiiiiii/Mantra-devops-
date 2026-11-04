@@ -200,6 +200,25 @@
       register: migration_package
       changed_when: false
 
+    - name: Enforce the migration contract for application releases when requested
+      ansible.builtin.assert:
+        that:
+          - migration_package.stdout | trim == 'True'
+        fail_msg: "Application release requires a packaged alembic.ini and migrations; do not bypass this gate to promote the pending application PR."
+      when: mantra_require_migrations | default(false) | bool
+
+    - name: Install backup tooling before any application migration
+      ansible.builtin.copy:
+        src: ../../scripts/backup-db-to-s3.sh
+        dest: /usr/local/sbin/mantra-backup-db
+        owner: root
+        group: root
+        mode: '0750'
+
+    - name: Back up the current database before applying migrations
+      ansible.builtin.command: /usr/local/sbin/mantra-backup-db
+      when: migration_package.stdout | trim == 'True'
+
     - name: Apply application-supplied migrations before starting the API
       ansible.builtin.command: docker compose --env-file .env run --rm --no-deps backend alembic upgrade head
       args:

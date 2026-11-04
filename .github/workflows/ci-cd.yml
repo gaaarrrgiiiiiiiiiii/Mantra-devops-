@@ -10,8 +10,34 @@ on:
     branches: [main]
 
 jobs:
+  schema-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Require versioned migrations for database changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python scripts/check-migration-contract.py --base "$BASE_SHA"
+
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: mantra_test
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: mantra_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mantra_test -d mantra_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,6 +48,7 @@ jobs:
         run: pip install -r backend/requirements.txt bandit
       - name: Run tests
         env:
+          MANTRA_TEST_POSTGRES_URL: postgresql+asyncpg://mantra_test:ci-only-password@localhost:5432/mantra_test
           IKI_ENVIRONMENT: test
           IKI_REQUIRE_API_KEY: 'false'
         run: PYTHONPATH=backend pytest tests/ -v
@@ -30,13 +57,30 @@ jobs:
       - name: Verify alert thresholds and timing
         run: docker run --rm -v "$PWD/prometheus:/etc/prometheus:ro" -w /etc/prometheus --entrypoint promtool prom/prometheus:v2.54.1 test rules alert.rules.test.yml
 
+  frontend-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
   docker-build:
-    needs: test
+    needs: [test, frontend-build, schema-contract]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Build image
-        run: docker build -t mantra-backend:${{ github.sha }} ./backend
+        run: |
+          docker build -t mantra-backend:${{ github.sha }} ./backend
+          docker build -t mantra-frontend:${{ github.sha }} ./frontend
       - name: Scan image
         run: |
           scanner=aquasec/trivy@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
