@@ -9,7 +9,7 @@ Production-oriented FastAPI backend for the first two Industrial Knowledge Intel
 
 - `IKI_REPOSITORY_BACKEND=memory`: tests and throwaway local runs.
 - `IKI_REPOSITORY_BACKEND=sqlite`: durable local development using SQLAlchemy and SQLite.
-- `IKI_REPOSITORY_BACKEND=postgres`: production deployment path using PostgreSQL, pgvector, and tsvector. Run Alembic migrations before starting the API.
+- `IKI_REPOSITORY_BACKEND=postgres`: production deployment path using PostgreSQL, pgvector, and tsvector. Enable `IKI_AUTO_CREATE_SCHEMA` for initial setup (see below).
 - `IKI_STORAGE_BACKEND=local`: stores raw uploaded documents under `IKI_LOCAL_STORAGE_PATH`.
 - `IKI_STORAGE_BACKEND=s3`: stores raw uploaded documents in private S3-compatible object storage.
 - `IKI_REQUIRE_API_KEY=true`: protects document, graph, and copilot endpoints with `IKI_API_KEY_HEADER`.
@@ -48,7 +48,13 @@ IKI_LONG_CONTEXT_MODEL=z-ai/glm-5.2
 
 ## Production Database
 
-The Alembic migrations create document, chunk, entity, audit-event, corpus-state, and semantic-cache tables. PostgreSQL deployments also get `pgvector`, `tsvector`, HNSW vector indexing, GIN full-text indexing, and a `vector(768)` semantic cache for the production hybrid retrieval path.
+This repository does not include Alembic migrations. With `IKI_AUTO_CREATE_SCHEMA=true`
+(the default), startup creates the ORM tables, enables the `vector` extension,
+and adds the vector and generated full-text columns required by hybrid retrieval.
+The database role needs permission to install the extension. Initialization is
+idempotent and preserves existing tables and columns. It does not create HNSW
+or GIN indexes; index tuning and versioned schema migrations remain separate work.
+Do not disable schema creation on a fresh database.
 
 For production, set:
 
@@ -57,7 +63,7 @@ IKI_REPOSITORY_BACKEND=postgres
 IKI_DATABASE_URL=postgresql+asyncpg://user:password@host:5432/industrial_intel
 IKI_STORAGE_BACKEND=s3
 IKI_S3_BUCKET=private-industrial-documents
-IKI_AUTO_CREATE_SCHEMA=false
+IKI_AUTO_CREATE_SCHEMA=true
 IKI_REQUIRE_API_KEY=true
 IKI_API_KEY=replace-with-secret
 IKI_LLM_PROVIDER=nvidia
